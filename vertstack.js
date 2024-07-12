@@ -1,12 +1,10 @@
 const http = require("http");
-const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const url = require("url");
-const zlib = require("zlib");
-const { execSync, spawn } = require("child_process");
-const os = require("os");
+const { spawn } = require("child_process");
+const EventEmitter = require('events');
 
 const isSandboxed = process.argv.includes("--sandboxed");
 
@@ -390,146 +388,252 @@ const sessions = new Map();
 const serverModules = new Map();
 const projectKeys = new Map();
 // <websocket>
-// Load the 'ws' package
-let WebSocket;
-
-async function getWsPackage() {
-  const cacheDir = path.join(__dirname, ".cache");
-  const wsDir = path.join(cacheDir, "ws");
-  const tarballPath = path.join(cacheDir, "ws.tar.gz");
-  const WebSocketPath = path.join(wsDir, "index.js");
-
-  // Check if the specific file we need exists
-  if (fs.existsSync(WebSocketPath)) {
-    return require(WebSocketPath);
+class WebSocket extends EventEmitter {
+  constructor(socket) {
+    super();
+    this.socket = socket;
+    this.readyState = WebSocket.CONNECTING;
+    this.frameBuffer = Buffer.alloc(0);
+    this.fragments = [];
+    this.lastPingTime = Date.now();
+    this.setupSocket();
   }
 
-  // If the cache directory exists but the file doesn't, clean it up
-  if (fs.existsSync(cacheDir)) {
-    fs.rmSync(cacheDir, { recursive: true, force: true });
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  setupSocket() {
+    this.socket.on('data', (data) => this.handleData(data));
+    this.socket.on('close', () => this.handleClose());
+    this.socket.on('error', (error) => this.handleError(error));
   }
 
-  // Recreate the cache directory
-  fs.mkdirSync(cacheDir, { recursive: true });
+  handleUpgrade(request, head) {
+    if (request.headers['sec-websocket-version'] !== '13') {
+      this.close(1002, 'Invalid WebSocket version');
+      return;
+    }
 
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(tarballPath);
-    https
-      .get("https://registry.npmjs.org/ws/-/ws-8.13.0.tgz", (response) => {
-        response.pipe(file);
-        file.on("finish", () => {
-          file.close(async () => {
-            try {
-              if (os.platform() === "win32") {
-                // Windows extraction using Node.js built-in modules
-                await extractTarGz(tarballPath, cacheDir);
-              } else {
-                // Unix-like (Linux, macOS)
-                execSync(`tar -xzf ${tarballPath} -C ${cacheDir}`);
-              }
+    const key = request.headers['sec-websocket-key'];
+    const acceptKey = this.generateAcceptKey(key);
 
-              // Rename the extracted folder
-              fs.renameSync(path.join(cacheDir, "package"), wsDir);
+    const responseHeaders = [
+      'HTTP/1.1 101 Switching Protocols',
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      `Sec-WebSocket-Accept: ${acceptKey}`,
+      '',
+      ''
+    ].join('\r\n');
 
-              // Remove the tarball
-              fs.unlinkSync(tarballPath);
+    this.socket.write(responseHeaders);
+    this.readyState = WebSocket.OPEN;
+    this.emit('open');
+    this.startPingInterval();
+  }
 
-              if (fs.existsSync(WebSocketPath)) {
-                resolve(require(WebSocketPath));
-              } else {
-                reject(
-                  new Error("WebSocket server file not found after extraction")
-                );
-              }
-            } catch (error) {
-              reject(error);
-            }
-          });
-        });
-      })
-      .on("error", (err) => {
-        fs.unlink(tarballPath, () => reject(err));
-      });
-  });
-}
+  generateAcceptKey(clientKey) {
+    const sha1 = crypto.createHash('sha1');
+    sha1.update(clientKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11');
+    return sha1.digest('base64');
+  }
 
-async function extractTarGz(tarballPath, destPath) {
-  return new Promise((resolve, reject) => {
-    const gunzip = zlib.createGunzip();
-    const extract = extractTar(destPath);
+  handleData(data) {
+    this.frameBuffer = Buffer.concat([this.frameBuffer, data]);
+    
+    while (this.frameBuffer.length > 2) {
+      const frame = this.decodeFrame();
+      if (!frame) break;
 
-    fs.createReadStream(tarballPath)
-      .pipe(gunzip)
-      .pipe(extract)
-      .on("finish", resolve)
-      .on("error", reject);
-  });
-}
-
-function extractTar(destPath) {
-  let currentFileInfo = null;
-  let currentFileBuffer = null;
-
-  return new require("stream").Transform({
-    transform(chunk, encoding, callback) {
-      let offset = 0;
-      while (offset < chunk.length) {
-        if (!currentFileInfo) {
-          // Read header
-          if (chunk.length - offset < 512) {
-            break;
+      switch (frame.opcode) {
+        case 0x1: // Text frame
+        case 0x2: // Binary frame
+          if (frame.fin) {
+            this.emit('message', frame.payload);
+          } else {
+            this.fragments.push(frame.payload);
           }
-          const header = chunk.slice(offset, offset + 512);
-          offset += 512;
-
-          const nameBuffer = header.slice(0, 100);
-          const name = nameBuffer.toString().split("\0")[0].trim();
-
-          if (name === "") {
-            break;
+          break;
+        case 0x0: // Continuation frame
+          this.fragments.push(frame.payload);
+          if (frame.fin) {
+            const fullMessage = Buffer.concat(this.fragments);
+            this.emit('message', fullMessage);
+            this.fragments = [];
           }
-
-          const sizeBuffer = header.slice(124, 124 + 12);
-          const size = parseInt(sizeBuffer.toString().trim(), 8);
-
-          currentFileInfo = { name, size, bytesRead: 0 };
-          currentFileBuffer = [];
-
-          if (size === 0) {
-            fs.mkdirSync(path.join(destPath, name), { recursive: true });
-            currentFileInfo = null;
-          }
-        } else {
-          // File content
-          const bytesToRead = Math.min(
-            chunk.length - offset,
-            currentFileInfo.size - currentFileInfo.bytesRead
-          );
-          const fileContent = chunk.slice(offset, offset + bytesToRead);
-          currentFileBuffer.push(fileContent);
-          offset += bytesToRead;
-          currentFileInfo.bytesRead += bytesToRead;
-
-          if (currentFileInfo.bytesRead >= currentFileInfo.size) {
-            const filePath = path.join(destPath, currentFileInfo.name);
-            fs.mkdirSync(path.dirname(filePath), { recursive: true });
-            fs.writeFileSync(filePath, Buffer.concat(currentFileBuffer));
-
-            const padding = 512 - (currentFileInfo.size % 512);
-            if (padding < 512) {
-              offset += padding;
-            }
-
-            currentFileInfo = null;
-            currentFileBuffer = null;
-          }
-        }
+          break;
+        case 0x8: // Close frame
+          this.close(1000);
+          break;
+        case 0x9: // Ping frame
+          this.sendPong(frame.payload);
+          break;
+        case 0xA: // Pong frame
+          this.lastPingTime = Date.now();
+          break;
       }
-      callback();
-    },
-  });
+    }
+  }
+
+  decodeFrame() {
+    if (this.frameBuffer.length < 2) return null;
+
+    const fin = (this.frameBuffer[0] & 0x80) !== 0;
+    const opcode = this.frameBuffer[0] & 0x0F;
+    const masked = (this.frameBuffer[1] & 0x80) !== 0;
+    let payloadLength = this.frameBuffer[1] & 0x7F;
+    let maskStart = 2;
+
+    if (payloadLength === 126) {
+      if (this.frameBuffer.length < 4) return null;
+      payloadLength = this.frameBuffer.readUInt16BE(2);
+      maskStart = 4;
+    } else if (payloadLength === 127) {
+      if (this.frameBuffer.length < 10) return null;
+      payloadLength = Number(this.frameBuffer.readBigUInt64BE(2));
+      maskStart = 10;
+    }
+
+    const totalLength = maskStart + (masked ? 4 : 0) + payloadLength;
+    if (this.frameBuffer.length < totalLength) return null;
+
+    let payload = this.frameBuffer.slice(maskStart + (masked ? 4 : 0), totalLength);
+
+    if (masked) {
+      const mask = this.frameBuffer.slice(maskStart, maskStart + 4);
+      for (let i = 0; i < payload.length; i++) {
+        payload[i] ^= mask[i % 4];
+      }
+    }
+
+    this.frameBuffer = this.frameBuffer.slice(totalLength);
+
+    return { fin, opcode, payload };
+  }
+
+  send(data, options = {}) {
+    if (this.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is not open');
+    }
+
+    const isBinary = options.binary || Buffer.isBuffer(data);
+    const opcode = isBinary ? 0x2 : 0x1;
+    const payload = isBinary ? data : Buffer.from(data);
+    const frameBuffer = this.createFrame(opcode, payload);
+
+    return new Promise((resolve, reject) => {
+      this.socket.write(frameBuffer, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+
+  createFrame(opcode, payload) {
+    const fin = 1;
+    const mask = 0; // Server doesn't need to mask frames
+    let payloadLength = payload.length;
+
+    let headerLength = 2;
+    if (payloadLength > 65535) {
+      headerLength += 8;
+    } else if (payloadLength > 125) {
+      headerLength += 2;
+    }
+
+    const frame = Buffer.alloc(headerLength + payloadLength);
+
+    frame[0] = (fin << 7) | opcode;
+
+    if (payloadLength > 65535) {
+      frame[1] = (mask << 7) | 127;
+      frame.writeBigUInt64BE(BigInt(payloadLength), 2);
+    } else if (payloadLength > 125) {
+      frame[1] = (mask << 7) | 126;
+      frame.writeUInt16BE(payloadLength, 2);
+    } else {
+      frame[1] = (mask << 7) | payloadLength;
+    }
+
+    payload.copy(frame, headerLength);
+
+    return frame;
+  }
+
+  close(code = 1000, reason = '') {
+    if (this.readyState === WebSocket.CLOSED) return;
+
+    const buffer = Buffer.alloc(2 + reason.length);
+    buffer.writeUInt16BE(code, 0);
+    buffer.write(reason, 2);
+
+    this.send(buffer, { binary: true })
+      .then(() => {
+        this.readyState = WebSocket.CLOSING;
+        this.socket.end();
+      })
+      .catch((error) => {
+        console.error('Error closing WebSocket:', error);
+        this.socket.destroy();
+      });
+  }
+
+  handleClose() {
+    this.readyState = WebSocket.CLOSED;
+    this.stopPingInterval();
+    this.emit('close');
+  }
+
+  handleError(error) {
+    this.emit('error', error);
+  }
+
+  startPingInterval() {
+    this.pingInterval = setInterval(() => {
+      if (Date.now() - this.lastPingTime > 30000) {
+        this.send(Buffer.alloc(0), { binary: true })
+          .catch(() => this.close(1001, 'Ping timeout'));
+      }
+    }, 15000);
+  }
+
+  stopPingInterval() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+    }
+  }
+
+  sendPong(payload) {
+    const pongFrame = this.createFrame(0xA, payload);
+    this.socket.write(pongFrame);
+  }
 }
 
+class WebSocketServer extends EventEmitter {
+  constructor(options = {}) {
+    super();
+    this.server = options.server || http.createServer();
+    this.setupServerListeners();
+  }
+
+  setupServerListeners() {
+    this.server.on('upgrade', (request, socket, head) => {
+      this.handleUpgrade(request, socket, head);
+    });
+  }
+
+  handleUpgrade(request, socket, head) {
+    const ws = new WebSocket(socket);
+    ws.handleUpgrade(request, head);
+    this.emit('connection', ws, request);
+  }
+
+  listen(port, callback) {
+    this.server.listen(port, callback);
+  }
+}
 // </websocket>
 
 // <session>
@@ -570,10 +674,9 @@ function createSession() {
 
 function setupServer(options) {
   const server = createHttpServer();
-  const wss = new WebSocket.Server({ noServer: true });
+  const wss = new WebSocketServer({ server });
 
   setupWebSocketServer(wss);
-  setupHttpServerUpgrade(server, wss);
   startServer(server, options);
 }
 
@@ -1169,14 +1272,6 @@ function setupWebSocketServer(wss) {
   wss.on("connection", handleWebSocketConnection);
 }
 
-function setupHttpServerUpgrade(server, wss) {
-  server.on("upgrade", (request, socket, head) => {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
-    });
-  });
-}
-
 function handleWebSocketConnection(ws, request) {
   const cookies = parseCookies(request.headers.cookie);
   const sessionId = cookies.sessionId;
@@ -1559,17 +1654,8 @@ if (isSandboxed) {
       })
     ).then(() => {
       // Server setup is now handled in the setupServer function
-      // which is called after WebSocket is loaded
-
-      getWsPackage()
-        .then((ws) => {
-          WebSocket = ws;
-          setupServer(options);
-        })
-        .catch((err) => {
-          console.error("Failed to load WebSocket package:", err);
-          process.exit(1);
-        });
+    
+      setupServer(options);
     });
   } else {
     console.log(
