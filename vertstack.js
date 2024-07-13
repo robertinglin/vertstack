@@ -190,29 +190,29 @@ function createBus(projectKey, handleRemoteDispatch) {
 
   function handleLocalDispatch(key, data) {
     const responses = [];
-    responses.push(...notifySubscribers("*", { key, data }));
-    responses.push(...notifySubscribers(key, { key, data }));
+    responses.push(notifySubscribers("*", { key, data }));
+    responses.push(notifySubscribers(key, { key, data }));
 
     const keyParts = key.split(".");
     for (let i = 1; i <= keyParts.length; i++) {
       const partialKey = keyParts.slice(0, i).join(".");
       if (partialKey !== key) {
-        responses.push(...notifySubscribers(partialKey, { key, data }));
+        responses.push(notifySubscribers(partialKey, { key, data }));
       }
 
       const wildcardKey = `*.${keyParts.slice(1, i).join(".")}`;
-      responses.push(...notifySubscribers(wildcardKey, { key, data }));
+      responses.push(notifySubscribers(wildcardKey, { key, data }));
     }
 
-    return responses;
+    return Promise.all(responses).then((responses) => responses.flat());
   }
 
-  function notifySubscribers(key, payload) {
+  async function notifySubscribers(key, payload) {
     let responses = [];
     if (subscribers.has(key)) {
-      subscribers.get(key).forEach((callback) => {
+      await Promise.all(Array.from(subscribers.get(key)).map(async (callback) => {
         try {
-          const response = callback(payload);
+          const response = await callback(payload);
           if (response !== undefined) {
             if (!key.startsWith(projectKey)) {
               key = projectKey + "." + key;
@@ -225,7 +225,7 @@ function createBus(projectKey, handleRemoteDispatch) {
         } catch (error) {
           console.error(`Error in subscriber callback for ${key}:`, error);
         }
-      });
+      }));
     }
     return responses;
   }
