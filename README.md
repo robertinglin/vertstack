@@ -24,7 +24,7 @@ VertStack is a lightweight framework for building modular, real-time web applica
 
 ### Prerequisites
 
-- Node.js (version 12 or higher recommended)
+- Node.js (version 20 or higher recommended)
 - A modern web browser
 
 ### Installation
