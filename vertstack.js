@@ -406,8 +406,10 @@ class WebSocket extends EventEmitter {
 
   setupSocket() {
     this.socket.on('data', (data) => this.handleData(data));
-    this.socket.on('close', () => this.handleClose());
+    this.socket.on('close', (hadError) => this.handleClose(hadError));
     this.socket.on('error', (error) => this.handleError(error));
+    // Add a listener for the 'end' event
+    this.socket.on('end', () => this.handleEnd());
   }
 
   handleUpgrade(request, head) {
@@ -512,21 +514,24 @@ class WebSocket extends EventEmitter {
 
     return { fin, opcode, payload };
   }
-
-  send(data, options = {}) {
+  send(data, options = { opcode: null }) {
     if (this.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket is not open');
+      return Promise.reject(new Error('WebSocket is not open'));
     }
 
     const isBinary = options.binary || Buffer.isBuffer(data);
-    const opcode = isBinary ? 0x2 : 0x1;
+    const opcode = options?.opcode ?? (isBinary ? 0x2 : 0x1);
     const payload = isBinary ? data : Buffer.from(data);
     const frameBuffer = this.createFrame(opcode, payload);
 
     return new Promise((resolve, reject) => {
       this.socket.write(frameBuffer, (error) => {
-        if (error) reject(error);
-        else resolve();
+        if (error) {
+          this.handleError(error);
+          reject(error);
+        } else {
+          resolve();
+        }
       });
     });
   }
@@ -576,27 +581,47 @@ class WebSocket extends EventEmitter {
       })
       .catch((error) => {
         console.error('Error closing WebSocket:', error);
-        this.socket.destroy();
+        this.forceClose();
       });
   }
 
-  handleClose() {
+  forceClose() {
     this.readyState = WebSocket.CLOSED;
     this.stopPingInterval();
-    this.emit('close');
+    this.socket.destroy();
+    this.emit('close', 1006, 'Connection closed abnormally');
+  }
+
+  handleClose(hadError) {
+    if (this.readyState !== WebSocket.CLOSED) {
+      this.readyState = WebSocket.CLOSED;
+      this.stopPingInterval();
+      this.emit('close', hadError ? 1006 : 1000, hadError ? 'Connection closed abnormally' : 'Normal closure');
+    }
   }
 
   handleError(error) {
     this.emit('error', error);
+    if (error.code === 'ECONNRESET') {
+      this.forceClose();
+    }
+  }
+
+  handleEnd() {
+    if (this.readyState === WebSocket.OPEN) {
+      this.close(1000, 'Connection ended by the other party');
+    }
   }
 
   startPingInterval() {
     this.pingInterval = setInterval(() => {
       if (Date.now() - this.lastPingTime > 30000) {
-        this.send(Buffer.alloc(0), { binary: true })
-          .catch(() => this.close(1001, 'Ping timeout'));
+        this.close(1001, 'Ping timeout');
+      } else {
+        this.send(Buffer.alloc(0), { opcode: 0x9 })
+          .catch(() => this.close(1001, 'Ping failed'));
       }
-    }, 15000);
+    }, 1000);
   }
 
   stopPingInterval() {
@@ -911,7 +936,8 @@ async function serveProjectPage(req, res, projectKey) {
         indexHtmlPath,
         projectKey,
         clientCode,
-        clientJsContent
+        clientJsContent,
+        true
       );
     } else {
       serveDefaultProjectPage(
@@ -1058,7 +1084,8 @@ async function serveHtmlFile(
   filePath,
   projectKey,
   clientCode,
-  clientJsContent = ""
+  clientJsContent = "",
+  forceClientCodeInjection = false
 ) {
   try {
     let htmlContent = fs.readFileSync(filePath, "utf8");
@@ -1154,7 +1181,8 @@ async function serveHtmlFile(
       htmlContent,
       clientCode,
       clientJsContent,
-      projectKey
+      projectKey,
+      forceClientCodeInjection
     );
     htmlContent = injectResizeScript(htmlContent, projectKey);
     res.writeHead(200, { "Content-Type": "text/html" });
@@ -1170,7 +1198,8 @@ function injectClientBusCode(
   htmlContent,
   clientCode,
   clientJsContent,
-  projectKey
+  projectKey,
+  forceClientCodeInjection = false
 ) {
   const busCode = `
     <script>
@@ -1183,7 +1212,7 @@ function injectClientBusCode(
     ? `<script>${clientJsContent}</script>`
     : "";
 
-  if (!htmlContent.includes("<script>") && clientJsContent) {
+  if ((!htmlContent.includes("<script>") || forceClientCodeInjection) && clientJsContent) {
     if (htmlContent.includes("</body>")) {
       htmlContent = htmlContent.replace("</body>", `${clientJsScript}</body>`);
     } else if (htmlContent.includes("</html>")) {
@@ -1291,6 +1320,9 @@ function handleWebSocketConnection(ws, request) {
 function setupWebSocketListeners(ws, session) {
   ws.on("message", (message) => handleWebSocketMessage(message, session));
   ws.on("close", () => handleWebSocketClose(session));
+  ws.on('error', (error) => {
+    // Handle the error appropriately
+  });
 }
 
 async function handleWebSocketMessage(messageString, session) {
