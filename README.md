@@ -1,11 +1,5 @@
 # VertStack
 
-# Start
-
-```
-nodemon --watch . --ext js,mjs --exec "npx VertStack test"
-```
-
 ## Overview
 
 VertStack is a lightweight framework for building modular, real-time web applications with a vertical architecture. It allows developers to create interconnected client-server modules that communicate seamlessly across different parts of the application. Think of it as a microservice architecture without having to manage servers.
@@ -30,7 +24,7 @@ VertStack is a lightweight framework for building modular, real-time web applica
 
 ### Prerequisites
 
-- Node.js (version 12 or higher recommended)
+- Node.js (version 20 or higher recommended)
 - A modern web browser
 
 ### Installation
@@ -64,10 +58,48 @@ your-project/
 Run the following command from your project root:
 
 ```bash
-node VertStack module1 module2 ...
+npx VertStack --port=3456 module1 module2 ...
+```
+Replace `module1`, `module2`, etc., with the names of your module directories.
+
+### Local Installation and Usage
+
+You can install VertStack locally in your project directory by using the `--install` flag. This process will:
+
+1. Download the current version of VertStack
+2. Create `watch`, `serve`, and `serve-down` scripts in your directory
+
+To install:
+
+```bash
+npx VertStack --install [options] module1 module2 ...
 ```
 
-Replace `module1`, `module2`, etc., with the names of your module directories.
+Once installed, you can use the following scripts:
+
+- `watch.cmd` (Windows) or `watch.sh` (Unix): Starts the server with auto-restart on file changes
+- `serve.cmd` (Windows) or `serve.sh` (Unix): Runs the server in detached mode
+- `serve-down.cmd` (Windows) or `serve-down.sh` (Unix): Stops the detached server
+
+The `serve` script automatically runs in detached mode and redirects output to a `vertstack.logs` file in your project's root directory.
+
+Example usage:
+
+```bash
+# Install VertStack locally with custom port and modules
+npx VertStack --install --port=3456 module1 module2
+
+# Start the server with auto-restart (development mode)
+./watch.cmd  # or ./watch.sh on Unix systems
+
+# Start the server in detached mode
+./serve.cmd  # or ./serve.sh on Unix systems
+
+# Stop the detached server
+./serve-down.cmd  # or ./serve-down.sh on Unix systems
+```
+
+After installation, you don't need to specify the modules again when running the scripts. The installation process saves your configuration for future use.
 
 ### Writing Server-Side Code
 
