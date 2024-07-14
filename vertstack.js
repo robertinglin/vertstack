@@ -1,4 +1,5 @@
-const http = require("http");
+const http = require('http');
+const https = require('https');
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -268,7 +269,7 @@ function createInterbus(sendExternalMessage) {
   const channels = new Map();
   const projectRequestPromises = new Map();
 
-  this.receiveExternalMessage = async (message) => {
+  this.receiveExternalMessage = async (message, sendResponse = true) => {
     if (message.requestId) {
       const channelResponses = [];
       const projectKey = extractProjectKey(message.key);
@@ -298,10 +299,14 @@ function createInterbus(sendExternalMessage) {
           Promise.all(channelResponses),
           timeout,
         ]);
-        sendExternalMessage({
-          responseId: message.requestId,
-          data: response.flat(),
-        });
+        if (sendResponse) {
+          sendExternalMessage({
+            responseId: message.requestId,
+            data: response.flat(),
+          });
+        } else {
+          return response.flat();
+        }
       }
     } else if (message.responseId) {
       const requestId = message.responseId;
@@ -444,7 +449,7 @@ class WebSocket extends EventEmitter {
 
   handleData(data) {
     this.frameBuffer = Buffer.concat([this.frameBuffer, data]);
-    
+
     while (this.frameBuffer.length > 2) {
       const frame = this.decodeFrame();
       if (!frame) break;
@@ -676,7 +681,7 @@ const initModule = (projectKey, session) => {
     });
     child.stdin.write(
       JSON.stringify({ key: projectKey, data: "connect", target: sessionId }) +
-        "\n"
+      "\n"
     );
   }
 };
@@ -697,8 +702,8 @@ function createSession() {
   return sessionId;
 }
 
-function setupServer(options) {
-  const server = createHttpServer();
+function setupServer(options, proxyPorts) {
+  const server = createHttpServer(proxyPorts);
   const wss = new WebSocketServer({ server });
 
   setupWebSocketServer(wss);
@@ -730,7 +735,7 @@ function getMainClientCode() {
 `;
 }
 
-function createHttpServer() {
+function createHttpServer(proxyPorts) {
   return http.createServer((req, res) => {
     const urlParts = req.url.split("/");
     const projectKey = urlParts[1].split("?")[0];
@@ -738,7 +743,11 @@ function createHttpServer() {
     if (req.url === "/") {
       serveMainPage(res);
     } else if (projectKeys.has(projectKey)) {
-      serveProjectPage(req, res, projectKey);
+      if (req.url.startsWith(`/${projectKey}/api`) || req.url.startsWith(`/${projectKey}/p/`)) {
+        serveApiRequest(req, res, projectKey, proxyPorts);
+      } else {
+        serveProjectPage(req, res, projectKey);
+      }
     } else {
       serveNotFound(res);
     }
@@ -952,6 +961,106 @@ async function serveProjectPage(req, res, projectKey) {
     console.error("Error in serveProjectPage:", error);
     serveNotFound(res);
   }
+}
+async function serveApiRequest(req, res, projectKey, proxyPorts) {
+  const session = sessions.get(req.headers.cookie?.split("=")[1]);
+  if (!session) {
+    res.writeHead(401);
+    res.end("Unauthorized");
+    return;
+  }
+
+  // Check if this is a proxy request
+  if (req.url.startsWith(`/${projectKey}/p/`)) {
+    const proxyPort = proxyPorts.get(projectKey);
+    if (proxyPort) {
+      return proxyRequest(req, res, proxyPort);
+    } else {
+      res.writeHead(404);
+      res.end("Proxy not configured for this module");
+      return;
+    }
+  }
+
+  // Parse query parameters
+  const queryParams = url.parse(req.url, true).query;
+
+  // Parse body data
+  let bodyData = {};
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    bodyData = await new Promise((resolve) => {
+      let body = '';
+      req.on('data', chunk => body += chunk.toString());
+      req.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (error) {
+          resolve({});
+        }
+      });
+    });
+  }
+
+  const requestKey = req.url.substring(1).split('?')[0].replaceAll("/", ".");
+
+  const message = {
+    key: "!" + requestKey,
+    data: {
+      method: req.method,
+      query: queryParams,
+      body: bodyData
+    },
+    requestId: Math.random().toString(36).slice(2),
+    target: session.sessionId,
+  };
+
+
+  try {
+    const responses = await session.interBus.receiveExternalMessage(
+      message,
+      false
+    );
+
+    const response = responses?.find(
+      (r) => r.key === requestKey
+    );
+
+    if (!responses?.length) {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+  
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(response ?? responses?.[0]?.data ?? {}));
+  } catch (error) {
+    console.error("Error processing API request:", error);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Internal Server Error" }));
+  }
+}
+
+function proxyRequest(req, res, targetPort) {
+  const options = {
+    hostname: '0.0.0.0',
+    port: targetPort,
+    path: req.url.split('/p/')[1],
+    method: req.method,
+    headers: req.headers,
+  };
+
+  const proxyReq = http.request(options, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res, { end: true });
+  });
+
+  req.pipe(proxyReq, { end: true });
+
+  proxyReq.on('error', (error) => {
+    console.error('Proxy request error:', error);
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('Proxy request failed');
+  });
 }
 
 function serveDefaultProjectPage(
@@ -1668,7 +1777,8 @@ if (isSandboxed) {
         if (arg.startsWith("--")) {
           acc[0].push(arg.slice(2).split("="));
         } else {
-          acc[1].push(arg);
+          const [module, proxyPort] = arg.split('=');
+          acc[1].push({ module, proxyPort });
         }
         return acc;
       },
@@ -1680,18 +1790,22 @@ if (isSandboxed) {
     }, {
       port: "3000",
     });
+
+    const proxyPorts = new Map();
+    modules.forEach(({ module, proxyPort }) => {
+      if (proxyPort) {
+        proxyPorts.set(module, proxyPort);
+      }
+    });
+
     Promise.all(
-      modules.map((arg) => {
-        return loadServerModule(arg);
-      })
+      modules.map(({ module }) => loadServerModule(module))
     ).then(() => {
-      // Server setup is now handled in the setupServer function
-    
-      setupServer(options);
+      setupServer(options, proxyPorts);
     });
   } else {
     console.log(
-      "No server modules specified. Run with: node script.js module1 module2 ..."
+      "No server modules specified. Run with: node script.js module1[=proxyPort] module2[=proxyPort] ..."
     );
   }
 }
