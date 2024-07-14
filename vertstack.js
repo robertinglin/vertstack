@@ -832,34 +832,6 @@ function serveMainPage(res) {
   const headScript = `
       <script>
       (function () {
-        let lastHeightMap = new Map();
-
-        function setIframeHeight(iframe, projectKey, newHeight, attempts = 0) {
-          if (
-            lastHeightMap.get(projectKey) === newHeight ||
-            !lastHeightMap.has(projectKey)
-          ) {
-            iframe.style.height = "";
-            lastHeightMap.set(projectKey, "!" + newHeight);
-            requestAnimationFrame(() => {
-              const height = iframe.contentDocument.body.scrollHeight;
-              iframe.style.height = height + "px";
-            });
-          } else if (lastHeightMap.get(projectKey) === "!" + newHeight) {
-            lastHeightMap.set(projectKey, "!!" + newHeight);
-          } else if (lastHeightMap.get(projectKey) !== "!!" + newHeight) {
-            iframe.style.height = newHeight + "px";
-            lastHeightMap.set(projectKey, newHeight);
-          } else {
-            setTimeout(() => {
-              if (
-                newHeight == lastHeightMap.get(projectKey)?.replaceAll("!", "")
-              ) {
-                lastHeightMap.delete(projectKey);
-              }
-            });
-          }
-        }
         window.addEventListener(
           "message",
           function (event) {
@@ -867,12 +839,7 @@ function serveMainPage(res) {
               "iframe-" + event.data.projectKey
             );
             if (iframe && typeof event.data.height === "number") {
-              setIframeHeight(
-                iframe,
-                event.data.projectKey,
-                event.data.height,
-                0
-              );
+              iframe.style.height = event.data.height + "px";
             }
           },
           false
@@ -1044,9 +1011,9 @@ function proxyRequest(req, res, targetPort) {
   const options = {
     hostname: '0.0.0.0',
     port: targetPort,
-    path: req.url.split('/p/')[1],
+    path: '/' + req.url.split('/p/')[1],
     method: req.method,
-    headers: req.headers,
+    headers: { ...req.headers } 
   };
 
   const proxyReq = http.request(options, (proxyRes) => {
@@ -1350,9 +1317,50 @@ function injectClientBusCode(
 function injectResizeScript(htmlContent, projectKey) {
   const resizeScript = `
     <script>
+
+    function getIFrameHeight(){
+    function getComputedBodyStyle(prop) {
+        function getPixelValue(value) {
+            var PIXEL = /^\d+(px)?$/i;
+
+            if (PIXEL.test(value)) {
+                return parseInt(value,base);
+            }
+
+            var 
+                style = el.style.left,
+                runtimeStyle = el.runtimeStyle.left;
+
+            el.runtimeStyle.left = el.currentStyle.left;
+            el.style.left = value || 0;
+            value = el.style.pixelLeft;
+            el.style.left = style;
+            el.runtimeStyle.left = runtimeStyle;
+
+            return value;
+        }
+
+        var 
+            el = document.body,
+            retVal = 0;
+
+        if (document.defaultView && document.defaultView.getComputedStyle) {
+            retVal =  document.defaultView.getComputedStyle(el, null)[prop];
+        } else {//IE8 & below
+            retVal =  getPixelValue(el.currentStyle[prop]);
+        } 
+
+        return parseInt(retVal,10);
+    }
+
+    return document.body.offsetHeight +
+        getComputedBodyStyle('marginTop') +
+        getComputedBodyStyle('marginBottom');
+}
+
       function sendHeight() {
         const height = document.documentElement.scrollHeight;
-        window.parent.postMessage({ projectKey: '${projectKey}', height: height }, '*');
+        window.parent.postMessage({ projectKey: '${projectKey}', height: getIFrameHeight() }, '*');
       }
       
       window.addEventListener('load', sendHeight);
