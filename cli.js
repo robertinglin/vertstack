@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { spawn } = require('node:child_process');
+const { exec } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
@@ -51,6 +51,9 @@ async function watchEnvFiles() {
     }
 }
 
+const RED = '\x1b[31m';
+const RESET = '\x1b[0m';
+
 async function startServer() {
     const envFiles = await getEnvFiles();
     const nodeArgs = [
@@ -58,13 +61,30 @@ async function startServer() {
         path.join(__dirname, 'vertstack.js'),
         ...args
     ];
-    childProcess = spawn('nodemon', ['--watch', '.', '--ext', 'js,mjs', '--', ...nodeArgs], {
-        stdio: 'inherit'
-    });
-    childProcess.on('close', (code) => {
-        if (code !== null) {
-            console.log(`Child process exited with code ${code}`);
+
+    const command = `nodemon --watch . --ext js,mjs -- ${nodeArgs.join(' ')}`;
+
+    const childProcess = exec(command, (error, stdout, stderr) => {
+        if (error) {
+            console.error(`${RED}exec error: ${error}${RESET}`);
+            return;
         }
+        if (stderr) {
+            console.error(`${RED}${stderr}${RESET}`);
+        }
+    });
+
+    childProcess.stdout.on('data', (data) => {
+        process.stdout.write(data);
+    });
+
+    childProcess.stderr.on('data', (data) => {
+        process.stderr.write(`${RED}${data}${RESET}`);
+    });
+
+    process.on('SIGINT', () => {
+        childProcess.kill();
+        process.exit();
     });
 }
 
