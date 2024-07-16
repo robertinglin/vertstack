@@ -150,7 +150,7 @@ Export a function that takes `bus` and `sessionId` as parameters and optionally 
 
 ## Static File Serving
 
-VSS automatically serves static files from the `public/` or `dist/` directory within each module. This is useful for serving HTML, CSS, JavaScript, and other assets specific to each module.
+VertStack automatically serves static files from the `public/` or `dist/` directory within each module. This is useful for serving HTML, CSS, JavaScript, and other assets specific to each module.
 
 ### Usage
 
@@ -183,7 +183,7 @@ Example `index.html`:
 <!DOCTYPE html>
 <html>
 <head>
-    <title>My VSS Application</title>
+    <title>My VertStack Application</title>
 </head>
 <body>
     <header>Welcome to My App</header>
@@ -195,14 +195,14 @@ Example `index.html`:
             <!-- @module2 -->
         </section>
     </main>
-    <footer>© 2024 My VSS Application</footer>
+    <footer>© 2024 My VertStack Application</footer>
 </body>
 </html>
 ```
 
 ## URL Rewriting
 
-VSS automatically rewrites relative URLs within each module to ensure they work correctly when served as part of the larger application.
+VertStack automatically rewrites relative URLs within each module to ensure they work correctly when served as part of the larger application.
 
 This feature works for:
 - HTML `src` and `href` attributes
@@ -223,7 +223,6 @@ Modules are rendered within iframes, which are automatically resized to fit thei
 
 No additional configuration is required; this feature works automatically for all modules.
 
-
 ## Best Practices
 
 1. Use meaningful namespaces for your events to avoid conflicts.
@@ -237,54 +236,86 @@ No additional configuration is required; this feature works automatically for al
 
 ## Examples
 
-### Chat Module with Cross-Channel Notification and Local Logic
+### Chat Module
+
+Here's an example of a simple chat module using VertStack:
 
 server.js:
 
 ```javascript
+const activeUsers = new Map();
+
 module.exports = function (bus, sessionId) {
-  bus("chat.connect", (payload) => {
-    bus("chat.message", { user: sessionId, text: "A new user connected" }, "*");
-    // Notify another module about the new connection
-    bus("#userStats.newConnection", { sessionId });
-    // Local server-side logic
-    bus("@chat.logConnection", { sessionId, timestamp: Date.now() });
+  const broadcastMessage = (type, data) => {
+    activeUsers.forEach((_, userId) => {
+      if (userId !== sessionId) {
+        bus(type, data, userId);
+      }
+    });
+  };
+
+  const addUser = (username) => {
+    activeUsers.set(sessionId, username);
+    broadcastMessage('userJoined', { userId: sessionId, username });
+  };
+
+  const removeUser = () => {
+    const username = activeUsers.get(sessionId);
+    activeUsers.delete(sessionId);
+    broadcastMessage('userLeft', { userId: sessionId, username });
+  };
+
+  bus('chat.join', (payload) => {
+    addUser(payload.data.username);
+    bus('!chat.joinSuccess', { userId: sessionId, activeUsers: Array.from(activeUsers) }, sessionId);
   });
 
-  bus("chat.message", (payload) => {
-    bus("chat.message", { user: sessionId, text: payload.data.text }, "*");
+  bus('chat.message', (payload) => {
+    const username = activeUsers.get(sessionId);
+    broadcastMessage('message', { userId: sessionId, username, text: payload.data.text });
   });
 
-  // Handle local server-side event
-  bus("@chat.logConnection", (payload) => {
-    console.log(`User ${payload.data.sessionId} connected at ${payload.data.timestamp}`);
-  });
+  return () => {
+    removeUser();
+  };
 };
 ```
 
 client.js:
 
 ```javascript
-bus("chat.message", (payload) => {
-  displayMessage(payload.data.user, payload.data.text);
+let myUserId = null;
+
+function joinChat(username) {
+  bus('chat.join', { username });
+}
+
+function sendMessage(text) {
+  if (myUserId) {
+    bus('chat.message', { text });
+  } else {
+    console.error('Not connected to chat. Please join first.');
+  }
+}
+
+bus('!chat.joinSuccess', (payload) => {
+  myUserId = payload.data.userId;
+  console.log('Successfully joined chat');
+  updateUserList(payload.data.activeUsers);
 });
 
-document.getElementById("sendButton").onclick = () => {
-  const text = document.getElementById("messageInput").value;
-  bus("chat.message", { text });
-  // Local client-side logic
-  bus("@chat.updateUI", { text });
-};
-
-// Listen for events from another module
-bus("#userStats.update", (payload) => {
-  updateUserStatsDisplay(payload.data);
+bus('!chat.userJoined', (payload) => {
+  console.log(`${payload.data.username} has joined the chat`);
+  addUserToList(payload.data.userId, payload.data.username);
 });
 
-// Handle local client-side event
-bus("@chat.updateUI", (payload) => {
-  clearMessageInput();
-  scrollChatToBottom();
+bus('!chat.userLeft', (payload) => {
+  console.log(`${payload.data.username} has left the chat`);
+  removeUserFromList(payload.data.userId);
+});
+
+bus('!chat.message', (payload) => {
+  displayMessage(payload.data.username, payload.data.text);
 });
 ```
 
