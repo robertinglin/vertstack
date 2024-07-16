@@ -1,10 +1,9 @@
 const http = require('http');
-const https = require('https');
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const url = require("url");
-const { spawn } = require("child_process");
+const { fork } = require('child_process');
 const EventEmitter = require('events');
 
 const isSandboxed = process.argv.includes("--sandboxed");
@@ -69,6 +68,27 @@ function parseKey(key, projectKey) {
   };
 }
 // </parsekey>
+
+// <colors>
+const colors = [
+  '\x1b[32m', '\x1b[33m', '\x1b[34m', '\x1b[35m', '\x1b[36m', '\x1b[37m',
+  '\x1b[91m', '\x1b[92m', '\x1b[93m', '\x1b[94m', '\x1b[95m', '\x1b[96m', '\x1b[97m'
+];
+const resetColor = '\x1b[0m';
+
+function getColorForModule(moduleName, modules) {
+  const sortedModules = [...modules].sort();
+  const index = sortedModules.indexOf(moduleName);
+  return colors[index % colors.length];
+}
+
+function createColoredPrefix(moduleName, modules) {
+  console.log(moduleName, modules);
+  const color = getColorForModule(moduleName, modules);
+  return `${color}[${moduleName}]${resetColor}`;
+}
+
+// </colors>
 
 // <bus>
 function createBus(projectKey, handleRemoteDispatch) {
@@ -668,7 +688,7 @@ class WebSocketServer extends EventEmitter {
 
 // <session>
 
-const initModule = (projectKey, session) => {
+function initModule(projectKey, session) {
   const sessionId = session.sessionId;
   // Initialize the server module for this session
   if (serverModules.has(projectKey)) {
@@ -677,12 +697,9 @@ const initModule = (projectKey, session) => {
       if (!message.target) {
         message.target = sessionId;
       }
-      child.stdin.write(JSON.stringify(message) + "\n");
+      child.send(message);
     });
-    child.stdin.write(
-      JSON.stringify({ key: projectKey, data: "connect", target: sessionId }) +
-      "\n"
-    );
+    child.send({ key: projectKey, data: "connect", target: sessionId });
   }
 };
 
@@ -997,7 +1014,7 @@ async function serveApiRequest(req, res, projectKey, proxyPorts) {
       res.end();
       return;
     }
-  
+
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(response ?? responses?.[0]?.data ?? {}));
   } catch (error) {
@@ -1013,7 +1030,7 @@ function proxyRequest(req, res, targetPort) {
     port: targetPort,
     path: '/' + req.url.split('/p/')[1],
     method: req.method,
-    headers: { ...req.headers } 
+    headers: { ...req.headers }
   };
 
   const proxyReq = http.request(options, (proxyRes) => {
@@ -1489,46 +1506,43 @@ function parseCookies(cookieHeader) {
 
 // <module>
 
-async function loadServerModule(project) {
-  const child = spawnChildProcess(project);
+function loadServerModule(project) {
+  const child = forkChildProcess(project);
   setupChildProcessListeners(child, project);
   registerModule(child, project);
   return child;
 }
 
-function spawnChildProcess(project) {
-  return spawn("node", [__filename, "--sandboxed", project], {
-    stdio: ["pipe", "pipe", "pipe", "ipc"],
+function forkChildProcess(project) {
+  return fork(__filename, ['--sandboxed', project], {
+    stdio: ['pipe', 'pipe', 'pipe', 'ipc']
   });
 }
 
 function setupChildProcessListeners(child, project) {
-  child.stdout.on("data", (data) => handleChildProcessOutput(data, project));
-  child.stderr.on("data", (data) => handleChildProcessError(data, project));
-  child.on("close", (code) => handleChildProcessClose(code, project));
+  const prefix = createColoredPrefix(project, projectKeys.keys());
+
+  child.stdout.on('data', (data) => {
+    process.stdout.write(`${prefix} ${data}`);
+  });
+
+  child.stderr.on('data', (data) => {
+    process.stderr.write(`${prefix} \x1b[31m${data}\x1b[0m`);
+  });
+
+  child.on('message', (message) => handleChildProcessMessage(message, project));
+  child.on('error', (error) => handleChildProcessError(error, project));
+  child.on('exit', (code) => handleChildProcessExit(code, project));
 }
 
-function handleChildProcessOutput(data, project) {
-  const messages = data
-    .toString()
-    .split("\n")
-    .filter((msg) => msg.trim() !== "");
-  messages.forEach((message) => processChildMessage(message, project));
-}
-
-function processChildMessage(message, project) {
-  if (!message.startsWith("{")) {
-    console.log(`${project} :: ${message}`);
+function handleChildProcessMessage(message, project) {
+  if (typeof message === 'string') {
+    const prefix = createColoredPrefix(project, projectKeys.keys());
+    console.log(`${prefix} ${message}`);
     return;
   }
 
-  try {
-    const parsedMessage = JSON.parse(message);
-
-    broadcastMessageToSessions(parsedMessage, project);
-  } catch (error) {
-    console.error(`Error parsing message from ${project}:`, error);
-  }
+  broadcastMessageToSessions(message, project);
 }
 
 function broadcastMessageToSessions(message, sourceProject) {
@@ -1539,17 +1553,18 @@ function broadcastMessageToSessions(message, sourceProject) {
   });
 }
 
-function handleChildProcessError(data, project) {
-  console.error(`Error from ${project}:`, data.toString());
+function handleChildProcessError(error, project) {
+  const prefix = createColoredPrefix(project, projectKeys.keys());
+  console.error(`${prefix} \x1b[31m${error}\x1b[0m`);
 }
 
-function handleChildProcessClose(code, project) {
-  console.log(`Child process for ${project} exited with code ${code}`);
+function handleChildProcessExit(code, project) {
+  const prefix = createColoredPrefix(project, projectKeys.keys());
+  console.log(`${prefix} Child process exited with code ${code}`);
 }
 
 function registerModule(child, project) {
   serverModules.set(project, child);
-  projectKeys.set(project, project);
 }
 
 // </module>
@@ -1698,44 +1713,27 @@ function handleSandboxedMode() {
     }
   }
 
-  async function handleIncomingMessage(chunk) {
+  async function handleIncomingMessage(message) {
     if (!moduleLoaded) {
-      messageQueue.push(chunk);
+      messageQueue.push(message);
       return;
     }
 
-    const messages = chunk
-      .toString()
-      .split("\n")
-      .filter((msg) => msg.trim());
-    for (const messageString of messages) {
-      let message;
-      try {
-        message = JSON.parse(messageString);
-      } catch (error) {
-        console.error("Error parsing message:", error, chunk.toString());
+    if (message.data === "connect") {
+      handleNewConnection(message);
+    } else {
+      const [bus, handleExternal] = sessions.get(message.target) || [];
+      if (!bus) {
+        console.error("No session found for target", message.target);
         return;
       }
-
-      if (message.data === "connect") {
-        handleNewConnection(message);
-      } else {
-        const [bus, handleExternal] = sessions.get(message.target) || [];
-        if (!bus) {
-          console.error("No session found for target", message.target);
-          return;
-        }
-        const res = await handleExternal(message);
-        if (!message.responseId) {
-
-          process.stdout.write(
-            JSON.stringify({
-              responseId: message.requestId,
-              data: res,
-              target: message.target,
-            }) + "\n"
-          );
-        }
+      const res = await handleExternal(message);
+      if (!message.responseId) {
+        process.send({
+          responseId: message.requestId,
+          data: res,
+          target: message.target,
+        });
       }
     }
   }
@@ -1746,7 +1744,7 @@ function handleSandboxedMode() {
       if (!payload.target || payload.target === true) {
         payload.target = sessionId;
       }
-      process.stdout.write(JSON.stringify(payload) + "\n");
+      process.send(payload);
     });
     sessions.set(sessionId, [bus, handleExternal]);
 
@@ -1756,7 +1754,7 @@ function handleSandboxedMode() {
     }
   }
 
-  process.stdin.on("data", handleIncomingMessage);
+  process.on('message', handleIncomingMessage);
 
   process.on("SIGTERM", async () => {
     for (const cleanup of cleanupCallbacks) {
@@ -1767,7 +1765,7 @@ function handleSandboxedMode() {
 
   loadModule(projectKey).then((sm) => {
     serverModule = sm;
-    messageQueue.forEach((message) => process.stdin.emit("data", message));
+    messageQueue.forEach(handleIncomingMessage);
   });
 }
 
@@ -1804,6 +1802,7 @@ if (isSandboxed) {
       if (proxyPort) {
         proxyPorts.set(module, proxyPort);
       }
+      projectKeys.set(module, module);
     });
 
     Promise.all(
