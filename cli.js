@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { exec } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
@@ -62,16 +62,13 @@ async function startServer() {
         ...args
     ];
 
-    const command = `nodemon --watch . --ext js,mjs -- ${nodeArgs.join(' ')}`;
+    if (childProcess) {
+        childProcess.kill();
+    }
 
-    const childProcess = exec(command, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`${RED}exec error: ${error}${RESET}`);
-            return;
-        }
-        if (stderr) {
-            console.error(`${RED}${stderr}${RESET}`);
-        }
+    childProcess = spawn('nodemon', ['--watch', '.', '--ext', 'js,mjs', '--', ...nodeArgs], {
+        stdio: 'pipe',
+        shell: true
     });
 
     childProcess.stdout.on('data', (data) => {
@@ -80,6 +77,14 @@ async function startServer() {
 
     childProcess.stderr.on('data', (data) => {
         process.stderr.write(`${RED}${data}${RESET}`);
+    });
+
+    childProcess.on('error', (error) => {
+        console.error(`${RED}spawn error: ${error}${RESET}`);
+    });
+
+    childProcess.on('close', (code) => {
+        console.log(`child process exited with code ${code}`);
     });
 
     process.on('SIGINT', () => {

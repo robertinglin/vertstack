@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const url = require("url");
-const { fork } = require('child_process');
+const { spawn } = require('child_process');
 const EventEmitter = require('events');
 
 const isSandboxed = process.argv.includes("--sandboxed");
@@ -1514,8 +1514,9 @@ function loadServerModule(project) {
 }
 
 function forkChildProcess(project) {
-  return fork(__filename, ['--sandboxed', project], {
-    stdio: ['pipe', 'pipe', 'pipe', 'ipc']
+  return spawn(process.execPath, [__filename, '--sandboxed', project], {
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    maxBuffer: 100 * 1024 * 1024,
   });
 }
 
