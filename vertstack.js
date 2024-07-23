@@ -94,6 +94,12 @@ function createColoredPrefix(moduleName, modules) {
 function createBus(projectKey, handleRemoteDispatch) {
   const subscribers = new Map();
   const responsePromises = new Map();
+  let closed = false;
+
+  function closeBus() {
+    subscribers.clear();
+    responsePromises.clear();
+  }
 
   function handleSubscription(key, callback) {
     const { normalizedKey } = parseKey(key, projectKey);
@@ -112,7 +118,7 @@ function createBus(projectKey, handleRemoteDispatch) {
   }
 
   function alwaysDispatchFromBus(key, data, target) {
-    const requestId = Math.random().toString(36).slice(2);
+    const requestId = Math.random().toString(36).substring(2) + Date.now().toString(36);
     return new Promise(async (resolve, reject) => {
       let { normalizedKey } = parseKey(key, projectKey);
       handleRemoteDispatch({
@@ -125,11 +131,14 @@ function createBus(projectKey, handleRemoteDispatch) {
       setTimeout(() => {
         if (responsePromises.has(requestId)) {
           responsePromises.delete(requestId);
-          console.error("Request timed out: " + requestId);
+          console.error("Request timed out: " + requestId + " for key: " + key);
         }
         resolve([]);
       }, 5000);
     }).then((response) => {
+      if (closed) {
+        return;
+      }
       let { normalizedKey } = parseKey(key, projectKey);
       if (normalizedKey.startsWith("!") || normalizedKey.startsWith("@")) {
         normalizedKey = normalizedKey.slice(1);
@@ -280,12 +289,12 @@ function createBus(projectKey, handleRemoteDispatch) {
     }
   };
 
-  return [bus, processExternalMessage];
+  return [bus, processExternalMessage, closeBus];
 }
 // </bus>
 
 // <interbus>
-function createInterbus(sendExternalMessage) {
+function InterBus(sendExternalMessage) {
   const channels = new Map();
   const projectRequestPromises = new Map();
 
@@ -703,9 +712,16 @@ function initModule(projectKey, session) {
   }
 };
 
+function closeSessionForModule(session) {
+  const sessionId = session.sessionId;
+  for (let [key, child] of serverModules) {
+    child.send({ key, data: "disconnect", target: sessionId });
+  }
+}
+
 function createSession() {
   const sessionId = crypto.randomBytes(16).toString("hex");
-  const sessionInterBus = createInterbus((message) => {
+  const sessionInterBus = new InterBus((message) => {
     if (session.ws && session.ws.readyState === WebSocket.OPEN) {
       session.ws.send(JSON.stringify(message));
     }
@@ -906,12 +922,17 @@ async function serveProjectPage(req, res, projectKey) {
 
     const clientCode = getIFrameCode(projectKey);
     const clientJsPath = path.join(projectPath, "client.js");
+    const clientMjsPath = path.join(projectPath, "client.mjs");
     let clientJsContent = "";
     try {
       clientJsContent = fs.readFileSync(clientJsPath, "utf8");
     } catch (error) {
-      // If client.js doesn't exist, we just leave clientJsContent as an empty string
-      console.log(`No client.js found for project ${projectKey}`);
+      try {
+        clientJsContent = fs.readFileSync(clientMjsPath, "utf8");
+      } catch (error) {
+        // If client.js doesn't exist, we just leave clientJsContent as an empty string
+        console.log(`No client found for project ${projectKey}`);
+      }
     }
 
     if (publicDir) {
@@ -994,7 +1015,7 @@ async function serveApiRequest(req, res, projectKey, proxyPorts) {
       query: queryParams,
       body: bodyData
     },
-    requestId: Math.random().toString(36).slice(2),
+    requestId: Math.random().toString(36).substring(2) + Date.now().toString(36),
     target: session.sessionId,
   };
 
@@ -1161,7 +1182,7 @@ async function serveFromPublicDirectory(
       if (contentType === "text/html") {
         await serveHtmlFile(res, filePath, projectKey, clientCode);
       } else {
-        const fileContent = fs.readFileSync(filePath, "utf8");
+        const fileContent = fs.readFileSync(filePath);
         res.writeHead(200, { "Content-Type": contentType });
         res.end(fileContent);
       }
@@ -1298,34 +1319,54 @@ function injectClientBusCode(
     <script>
       const projectKey = "${projectKey}";
       ${clientCode}
+      window.bus = bus;
     </script>
   `;
 
-  const clientJsScript = clientJsContent
-    ? `<script>${clientJsContent}</script>`
-    : "";
+  const isModule = clientJsContent.includes("export ") || clientJsContent.includes("import ") || clientJsContent.includes("module.exports");
 
-  if ((!htmlContent.includes("<script>") || forceClientCodeInjection) && clientJsContent) {
-    if (htmlContent.includes("</body>")) {
-      htmlContent = htmlContent.replace("</body>", `${clientJsScript}</body>`);
-    } else if (htmlContent.includes("</html>")) {
-      htmlContent = htmlContent.replace("</html>", `${clientJsScript}</html>`);
-    } else {
-      htmlContent = `${htmlContent}${clientJsScript}`;
-    }
-  }
+  const clientBlob = isModule ? `
+    <script type="module">
+      const clientCode = new Blob([\`${clientJsContent.replace(/\`/g, "\\\`").replaceAll("$", "\\$")}\`], { type: 'text/javascript' });
+      const clientUrl = URL.createObjectURL(clientCode);
+      
+      // Dynamically import the client module
+      import(clientUrl).then(module => {
+        // Register exported functions
+        for (let [key, func] of Object.entries(module)) {
+          if (typeof func === 'function' && key !== 'default') {
+            if (key.startsWith('_')) {
+              key = key.slice(1);
+              window.bus(key, (payload) => func(payload.data));
+            } else {
+              window.bus(key, (payload) => func(payload.data));
+              if (!key.startsWith(projectKey + ".")) {
+                key = projectKey + '.' + key;
+              }
+              bus("*." + key, (payload) => func(payload.data));
+            }
+
+          }
+        }
+      }).catch(error => console.error('Error loading client module:', error));
+    </script>
+  ` : `
+    <script>
+      ${clientJsContent}
+    </script>
+  `;
 
   if (htmlContent.includes("</head>")) {
-    htmlContent = htmlContent.replace("</head>", `${busCode}</head>`);
+    htmlContent = htmlContent.replace("</head>", `${busCode}${clientBlob}</head>`);
   } else if (htmlContent.includes("<body>")) {
-    htmlContent = htmlContent.replace("<body>", `${busCode}<body>`);
+    htmlContent = htmlContent.replace("<body>", `${busCode}${clientBlob}<body>`);
   } else if (htmlContent.includes("<html>")) {
     htmlContent = htmlContent.replace(
       "<html>",
-      `<html><head>${busCode}</head>`
+      `<html><head>${busCode}${clientBlob}</head>`
     );
   } else {
-    htmlContent = `<head>${busCode}</head>${htmlContent}`;
+    htmlContent = `<head>${busCode}${clientBlob}</head>${htmlContent}`;
   }
 
   return htmlContent;
@@ -1370,13 +1411,11 @@ function injectResizeScript(htmlContent, projectKey) {
         return parseInt(retVal,10);
     }
 
-    return document.body.offsetHeight +
-        getComputedBodyStyle('marginTop') +
+    return document.body.getBoundingClientRect().bottom +
         getComputedBodyStyle('marginBottom');
-}
+    }
 
       function sendHeight() {
-        const height = document.documentElement.scrollHeight;
         window.parent.postMessage({ projectKey: '${projectKey}', height: getIFrameHeight() }, '*');
       }
       
@@ -1464,16 +1503,26 @@ async function handleWebSocketMessage(messageString, session) {
 
   if (message.data === "connect") {
     initModule(message.key, session);
-  } else {
-    if (!message.target) {
-      message.target = session.sessionId;
+  } else if (message.data === 'disconnect') {
+    const child = serverModules.get(message.key);
+    if (child) {
+      child.send({ key: message.key, data: "disconnect", target: session.sessionId });
     }
-    session.interBus.receiveExternalMessage(message);
+  } else {
+    if (message.target === "*") {
+      console.error("Client attempted to send a broadcast message", session.id, message);
+    } else {
+      if (!message.target) {
+        message.target = session.sessionId;
+      }
+      session.interBus.receiveExternalMessage(message);
+    }
   }
 }
 
 function handleWebSocketClose(session) {
   sessions.delete(session.sessionId);
+  closeSessionForModule(session);
 }
 
 function sendInitialConnectionInfo(ws, session) {
@@ -1531,12 +1580,12 @@ function setupChildProcessListeners(child, project) {
     process.stderr.write(`${prefix} \x1b[31m${data}\x1b[0m`);
   });
 
-  child.on('message', (message) => handleChildProcessMessage(message, project));
+  child.on('message', (message) => handleChildProcessMessage(message, project, child));
   child.on('error', (error) => handleChildProcessError(error, project));
   child.on('exit', (code) => handleChildProcessExit(code, project));
 }
 
-function handleChildProcessMessage(message, project) {
+function handleChildProcessMessage(message, project, child) {
   if (typeof message === 'string') {
     const prefix = createColoredPrefix(project, projectKeys.keys());
     console.log(`${prefix} ${message}`);
@@ -1548,8 +1597,12 @@ function handleChildProcessMessage(message, project) {
 
 function broadcastMessageToSessions(message, sourceProject) {
   sessions.forEach((session) => {
-    if (session.sessionId === message.target || message.target === "*") {
-      session.interBus.receiveInternalMessage(sourceProject, message);
+    if (session.ws && (message.target === "*" || session.sessionId === message.target)) {
+      const messageToSend = { ...message };
+      if (message.target === "*") {
+        messageToSend.target = session.sessionId;
+      }
+      session.interBus.receiveInternalMessage(sourceProject, messageToSend);
     }
   });
 }
@@ -1589,6 +1642,10 @@ function client(projectKey) {
     }
   };
   broadcastChannel.postMessage({ key: projectKey, data: "connect" });
+
+  window.addEventListener('beforeunload', () => {
+    broadcastChannel.postMessage({ key: projectKey, data: "disconnect" });
+  });
 }
 // </client>
 
@@ -1597,8 +1654,9 @@ function mainClient(projectKeys) {
   let ws;
   let queue = [];
   const projectChannels = new Map();
+  let unloading = false;
 
-  const ibus = createInterbus((message) => {
+  const ibus = new InterBus((message) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message));
     } else {
@@ -1655,17 +1713,33 @@ function mainClient(projectKeys) {
     ibus.registerChannel(key, (message) => {
       channel.postMessage(message);
     });
-
-    queue.push({
-      key: key,
-      data: "connect",
-    });
   }
 
   function handleProjectChannelMessage(sourceKey, event) {
     const message = event.data;
+    if (message.data === "connect" && message.key === sourceKey) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ key: sourceKey, data: "connect" }));
+      } else {
+        queue.push({ key: sourceKey, data: "connect" });
+      }
+      return;
+    } else if (message.data === "disconnect" && message.key === sourceKey) {
+      setTimeout(() =>{
+        if (unloading) return;
+        ws.send(JSON.stringify({ key: sourceKey, data: "disconnect" }));
+      })
+      return;
+    }
+    if (message.target === "*") {
+      throw new Error("Client cannot handle broadcast messages, " + JSON.stringify(message));
+    }
     ibus.receiveInternalMessage(sourceKey, message);
   }
+
+  window.addEventListener('beforeunload', () => {
+    unloading = true;
+  });
 
   // Initialize the connection
   connectToServer();
@@ -1688,9 +1762,9 @@ function handleSandboxedMode() {
 
   async function loadModule(project) {
     const folderPath = path.join(process.cwd(), project);
-    const { moduleCreator, modulePath } = await findAndLoadModule(folderPath);
+    const { moduleCreator, modulePath, exports } = await findAndLoadModule(folderPath);
     moduleLoaded = true;
-    return moduleCreator;
+    return { moduleCreator, exports };
   }
 
   async function findAndLoadModule(folderPath) {
@@ -1702,15 +1776,18 @@ function handleSandboxedMode() {
       return {
         moduleCreator: module.default || module,
         modulePath: serverMjsPath,
+        exports: module
       };
     } else if (fs.existsSync(serverJsPath)) {
+      const module = require(serverJsPath);
       return {
-        moduleCreator: require(serverJsPath),
+        moduleCreator: module.default || module,
         modulePath: serverJsPath,
+        exports: module
       };
     } else {
       console.warn(`No module found for project ${path.basename(folderPath)}`);
-      return { moduleCreator: () => {}, modulePath: "No module found" };
+      return { moduleCreator: () => { }, modulePath: "No module found", exports: {} };
     }
   }
 
@@ -1722,6 +1799,11 @@ function handleSandboxedMode() {
 
     if (message.data === "connect") {
       handleNewConnection(message);
+    } else if (message.data === "disconnect") {
+      const [,, cleanup] = sessions.get(message.target) || [];
+      if (cleanup) {
+        cleanup();
+      }
     } else {
       const [bus, handleExternal] = sessions.get(message.target) || [];
       if (!bus) {
@@ -1740,17 +1822,47 @@ function handleSandboxedMode() {
   }
 
   function handleNewConnection(message) {
+    const cleanups = [];
     const sessionId = message.target;
-    const [bus, handleExternal] = createBus(projectKey, (payload) => {
+    const [bus, handleExternal, closeBus] = createBus(projectKey, (payload) => {
       if (!payload.target || payload.target === true) {
         payload.target = sessionId;
       }
+      payload.source = sessionId;
       process.send(payload);
     });
-    sessions.set(sessionId, [bus, handleExternal]);
+    const cleanupSession = () => {
+      sessions.delete(sessionId);
+      cleanups.forEach((cleanup) => {
+        const index = cleanupCallbacks.indexOf(cleanup);
+        if (index !== -1) {
+          cleanupCallbacks.splice(index, 1);
+        }
+        cleanup()
+      });
+      closeBus();
+    };
+    sessions.set(sessionId, [bus, handleExternal, cleanupSession]);
 
-    const cleanup = serverModule(bus, sessionId);
-    if (typeof cleanup === "function") {
+
+    for (let [key, func] of Object.entries(serverModule.exports)) {
+      if (typeof func === 'function' && key !== 'default') {
+        if (key.startsWith('_')) {
+          key = key.slice(1);
+          bus(key, (payload) => func(payload.data, sessionId, bus));
+        } else {
+          bus(key, (payload) => func(payload.data, sessionId, bus));
+          if (!key.startsWith(projectKey + ".")) {
+            key = projectKey + '.' + key;
+          }
+          bus("*." + key, (payload) => func(payload.data, sessionId, bus));
+        }
+      }
+    }
+
+    const cleanup = serverModule.moduleCreator(bus, sessionId);
+    cleanups.push(cleanup);
+    if (typeof cleanup === 'function') {
       cleanupCallbacks.push(cleanup);
     }
   }
@@ -1764,8 +1876,8 @@ function handleSandboxedMode() {
     process.exit(0);
   });
 
-  loadModule(projectKey).then((sm) => {
-    serverModule = sm;
+  loadModule(projectKey).then(({ moduleCreator, exports }) => {
+    serverModule = { moduleCreator, exports };
     messageQueue.forEach(handleIncomingMessage);
   });
 }

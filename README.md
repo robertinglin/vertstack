@@ -457,6 +457,64 @@ bus("!auth.invalid", () => {
 ```
 
 In this example, sensitive information like authentication tokens is only sent via private messages, ensuring that this data is not accidentally broadcast to other sessions or modules.
+## Automatic Listener Registration
+
+Vertstack now supports automatic registration of listeners based on exported functions. This feature simplifies the process of setting up event handlers in your modules.
+
+### Module Usage
+
+In your module's JavaScript files, simply export the functions you want to register as listeners:
+
+```javascript
+// Global listener (listens to this event from all modules)
+export const joinChat = ({ username }, sessionId, bus) => {
+  // Your implementation here
+  console.log(`User ${username} joined the chat. Session ID: ${sessionId}`);
+};
+
+// Global listener
+export const sendMessage = ({ message, username }, sessionId, bus) => {
+  // Your implementation here
+  console.log(`Message from ${username}: ${message}. Session ID: ${sessionId}`);
+};
+
+// Local listener (listens only to this event from this module)
+export const _updateLocalState = ({ data }) => {
+  // Your implementation here
+  console.log('Updating local state:', data);
+};
+```
+
+Vertstack will automatically register these functions as listeners when the module is loaded. The `sessionId` and `bus` parameters are automatically provided by the system for global listeners.
+
+### How It Works
+
+When you export a function, Vertstack automatically sets up a listener with the same name as the exported function. The behavior differs slightly based on whether the function name has an underscore prefix:
+
+For global listeners (without underscore):
+
+```javascript
+export const joinChat = ({ username }, sessionId, bus) => {...}
+```
+
+is equivalent to:
+
+```javascript
+bus('*.module.joinChat', (payload, sessionId, bus) => joinChat(payload, sessionId, bus))
+bus('module.joinChat', (payload, sessionId, bus) => joinChat(payload, sessionId, bus))
+```
+
+For local listeners (with underscore):
+
+```javascript
+export const _updateLocalState = ({ data }) => {...}
+```
+
+is equivalent to:
+
+```javascript
+bus('updateLocalState', (payload) => _updateLocalState(payload))
+```
 
 ## Best Practices for Private Messages
 

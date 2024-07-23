@@ -5,6 +5,133 @@ const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const os = require('node:os');
 
+async function fileExists(filePath) {
+    try {
+        await fs.access(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function findModuleFile(modulePath, fileName) {
+    const mjsPath = path.join(modulePath, `${fileName}.mjs`);
+    const jsPath = path.join(modulePath, `${fileName}.js`);
+
+    if (await fileExists(mjsPath)) {
+        return mjsPath;
+    } else if (await fileExists(jsPath)) {
+        return jsPath;
+    }
+    return null;
+}
+
+async function generateReadme(args) {
+    const modules = args.filter(arg => !arg.startsWith('--'));
+    let readmeContent = '# Project\n\n';
+
+    readmeContent += '### Start'
+    readmeContent += '\n\n```sh\n';
+    readmeContent += 'npx VertStack ' + args.join(' ') + '\n';
+    readmeContent += '```\n\n';
+    readmeContent += '## Modules\n\n';
+    readmeContent += modules.map(module => `* ${module}`).join('\n') + '\n\n';
+
+    for (const module of modules) {
+        readmeContent += `## ${module} module\n\n`;
+
+        const modulePath = path.join(process.cwd(), module);
+        const serverFile = await findModuleFile(modulePath, 'server');
+        const clientFile = await findModuleFile(modulePath, 'client');
+
+        if (serverFile) {
+            readmeContent += await generateModuleSection(serverFile, 'Server');
+        }
+        if (clientFile) {
+            readmeContent += await generateModuleSection(clientFile, 'Client');
+        }
+    }
+
+    await fs.writeFile('README.md', readmeContent);
+    console.log('README.md has been generated successfully.');
+}
+
+
+async function generateModuleSection(filePath, type) {
+    let content = '';
+    try {
+        const fileContent = await fs.readFile(filePath, 'utf-8');
+        const { incomingMessages, outgoingMessages } = parseFile(fileContent);
+
+        content += `### ${type}\n\n`;
+        
+        if (incomingMessages.length > 0) {
+            content += `#### Incoming Messages\n\n`;
+            for (const event of incomingMessages) {
+                content += `* \`${event.name}\`\n`;
+                if (event.params.length > 0) {
+                    content += `  - Payload: \`${event.params} \`\n`;
+                }
+            }
+            content += '\n';
+        }
+
+        if (outgoingMessages.length > 0) {
+            content += `#### Outgoing Messages\n\n`;
+            for (const event of outgoingMessages) {
+                content += `* \`${event.name}\`\n`;
+            }
+            content += '\n';
+        }
+    } catch (error) {
+        console.error(`Error reading ${type} file for module: ${error.message}`);
+    }
+    return content;
+}
+
+function parseFile(fileContent) {
+    const incomingMessages = [];
+    const outgoingMessages = [];
+
+    // Parse exported functions
+    const exportRegex = /export\s+(const|function|let)\s+(\w+)\s*(?:=\s*(?:async\s*)?\(([^)]*)\)\s*=>|=\s*function\s*\(([^)]*)\)|\(([^)]*)\))/g;
+    let match;
+    while ((match = exportRegex.exec(fileContent)) !== null) {
+        const [, , name, arrowParams, funcParams, shortArrowParams] = match;
+        const params = (arrowParams || funcParams || shortArrowParams || '').split(',').map(param => param.trim()).filter(p => p !== 'sessionId' && p !== 'bus' && p !== '');
+        incomingMessages.push({ name, params: params.join(', ') });
+    }
+
+    // Parse bus function calls
+    const busRegex = /bus\s*\(\s*['"]([^'"]+)['"]\s*,\s*(?:{([^}]*)}\s*=>|function\s*\(([^)]*)\)|\(([^)]*)\)\s*=>)?/g;
+    while ((match = busRegex.exec(fileContent)) !== null) {
+        const [, name, arrowParams, funcParams, shortArrowParams] = match;
+        if (arrowParams || funcParams || shortArrowParams) {
+            // This is a listener (incoming message)
+            const params = (arrowParams || funcParams || shortArrowParams || '').split(',').map(param => param.trim()).filter(p => p !== 'sessionId' && p !== 'bus' && p !== '');
+            incomingMessages.push({ name, params: params.join(', ') });
+        } else {
+
+            if (outgoingMessages.some(event => event.name === name)) {
+                continue;
+            }
+            // This is an emitter (outgoing message)
+            outgoingMessages.push({ name });
+        }
+    }
+
+    return { incomingMessages, outgoingMessages };
+}
+
+function shouldGenerateReadme() {
+    const readmeIndex = args.indexOf('--readme');
+    if (readmeIndex !== -1) {
+        args.splice(readmeIndex, 1);
+        return true;
+    }
+    return false;
+}
+
 const args = process.argv.slice(2);
 let childProcess;
 const envFilePattern = /^\.env/;
@@ -66,7 +193,7 @@ async function startServer() {
         childProcess.kill();
     }
 
-    childProcess = spawn('nodemon', ['--watch', '.', '--ext', 'js,mjs', '--', ...nodeArgs], {
+    childProcess = spawn('npx', ['nodemon', '--watch', '.', '--ext', 'js,mjs', '--', ...nodeArgs], {
         stdio: 'pipe',
         shell: true
     });
@@ -166,7 +293,7 @@ for %%F in (.env*) do (
     )
 )
 
-nodemon --watch . --ext js,mjs --exec "node %ENV_FILES% vertstack.js ${args.join(' ')}"`
+npx nodemon --watch . --ext js,mjs --exec "node %ENV_FILES% vertstack.js ${args.join(' ')}"`
         : `#!/bin/sh
 ENV_FILES=""
 for file in .env*; do
@@ -175,7 +302,7 @@ for file in .env*; do
     fi
 done
 
-nodemon --watch . --ext js,mjs --exec "node $ENV_FILES vertstack.js ${args.join(' ')}"`;
+npx nodemon --watch . --ext js,mjs --exec "node $ENV_FILES vertstack.js ${args.join(' ')}"`;
 
     // serveDownContent remains unchanged
     const serveDownContent = isWindows
@@ -264,7 +391,9 @@ function shouldInstall() {
 }
 
 async function main() {
-    if (shouldInstall()) {
+    if (shouldGenerateReadme()) {
+        await generateReadme(args);
+    } else if (shouldInstall()) {
         await updateEnvFileHashes();
         await copyVertStackFile();
         await createOrUpdateScripts();

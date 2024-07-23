@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VertStack Chat</title>
+    <style>
+        #chat-container { max-width: 600px; margin: 0 auto; }
+        #messages { height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+        #user-list { float: right; width: 150px; }
+        #chat-input { display: flex; gap: 10px; }
+        #message { flex-grow: 1; }
+    </style>
+</head>
+<body>
+    <div style="margin: 0">
+    <h1>VertStack Chat Example</h1>
+    <div id="chat-container">
+        <div id="user-list">
+            <h3>Active Users</h3>
+            <ul id="users"></ul>
+        </div>
+        <div id="messages"></div>
+        <div id="chat-input">
+            <input type="text" id="username" placeholder="Your username">
+            <button id="join-btn">Join Chat</button>
+        </div>
+        <div id="chat-input">
+            <input type="text" id="message" placeholder="Type a message">
+            <button id="send-btn">Send</button>
+        </div>
+    </div>
+</div>
+</body>
+</html>
