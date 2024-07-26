@@ -223,17 +223,6 @@ Modules are rendered within iframes, which are automatically resized to fit thei
 
 No additional configuration is required; this feature works automatically for all modules.
 
-## Best Practices
-
-1. Use meaningful namespaces for your events to avoid conflicts.
-2. Keep modules small and focused on specific functionality.
-3. Use private events (`!`) for sensitive operations.
-4. Implement cleanup functions to handle resource disposal.
-5. Use the `#` prefix for intentional cross-channel communication.
-6. Use the `@` prefix for local messages that should not be sent over the network.
-7. Utilize the `public/` or `dist/` directories for module-specific static files.
-8. Take advantage of the custom `index.html` feature for complex layouts.
-
 ## Examples
 
 ### Chat Module
@@ -516,21 +505,83 @@ is equivalent to:
 bus('updateLocalState', (payload) => _updateLocalState(payload))
 ```
 
-## Best Practices for Private Messages
+Certainly! I'll draft new sections for the readme to cover proxy support, shared worker implementation, and how to use pageId. Here's how we can add these to the existing readme:
 
-1. **Always use for sensitive data:** Any data that should not be visible to other sessions or modules should be sent using private messages.
+---
 
-2. **Combine with encryption:** For highly sensitive data, consider encrypting the payload before sending it as a private message for an additional layer of security.
+## Proxy Support
 
-3. **Validate recipients:** On the server side, always validate that the intended recipient of a private message is authorized to receive it before sending.
+VertStack now supports proxying requests to specific ports for each module. This feature is useful when you need to integrate existing services or APIs with your VertStack application.
 
-4. **Handle errors gracefully:** If a private message fails to send (e.g., if the target session no longer exists), handle this gracefully to prevent security information leaks.
+### Usage
 
-5. **Don't rely solely on privacy:** While private messages provide a level of security, they should be used in conjunction with other security measures like HTTPS, proper authentication, and authorization checks.
+When starting the server, you can specify a proxy port for each module:
 
-6. **Audit private message usage:** Regularly review your use of private messages to ensure they are being used appropriately and that no sensitive information is being inadvertently exposed.
+```bash
+npx VertStack module1=8080 module2=8081
+```
 
-By leveraging private messages effectively, you can create more secure and robust applications within the VertStack framework.
+This will set up module1 to proxy requests to port 8080 and module2 to port 8081.
+
+### How it works
+
+- Requests to `/{moduleName}/p/{path}` will be proxied to the specified port.
+- The proxy will forward all headers and the request body.
+- This allows you to seamlessly integrate existing services with your VertStack application.
+
+Example:
+If you have an existing API running on port 8080, you can integrate it with your VertStack module like this:
+
+```javascript
+// In your client.js
+async function fetchData() {
+  const response = await fetch('/module1/p/api/data');
+  const data = await response.json();
+  // Process the data
+}
+```
+
+This request will be proxied to `http://localhost:8080/api/data`.
+
+## Using pageId
+
+VertStack introduces the concept of `pageId` to manage multiple instances of the same module across different pages or components of a user session.
+
+### What is pageId?
+
+`pageId` is a unique identifier for each instance of a module. It allows you to:
+- Differentiate between multiple instances of the same module.
+- Send messages to specific instances of a module.
+- Handle state separately for each instance.
+
+### How to use pageId
+
+The `pageId` is automatically generated and managed by VertStack. In your module code, you can access and use it as follows:
+
+1. In server-side code:
+
+```javascript
+module.exports = function (bus, sessionId, pageId) {
+  bus('someEvent', (payload) => {
+    console.log(`Received event for page: ${pageId}`);
+    // Handle the event
+  });
+
+  // Send a message to a specific page instance
+  bus('specificPageEvent', data, sessionId, pageId);
+};
+```
+
+2. In client-side code:
+
+```javascript
+// The pageId is automatically handled in the background
+bus('someEvent', (payload) => {
+  // This will only be called for events sent to this specific page instance
+  console.log('Received event:', payload);
+});
+```
+
 ## Troubleshooting
 
 - If modules aren't loading, ensure the directory names match the command-line arguments.

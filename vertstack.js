@@ -83,7 +83,6 @@ function getColorForModule(moduleName, modules) {
 }
 
 function createColoredPrefix(moduleName, modules) {
-  console.log(moduleName, modules);
   const color = getColorForModule(moduleName, modules);
   return `${color}[${moduleName}]${resetColor}`;
 }
@@ -117,7 +116,7 @@ function createBus(projectKey, handleRemoteDispatch) {
     };
   }
 
-  function alwaysDispatchFromBus(key, data, target) {
+  function alwaysDispatchFromBus(key, data, target, pageId) {
     const requestId = Math.random().toString(36).substring(2) + Date.now().toString(36);
     return new Promise(async (resolve, reject) => {
       let { normalizedKey } = parseKey(key, projectKey);
@@ -126,15 +125,16 @@ function createBus(projectKey, handleRemoteDispatch) {
         data,
         requestId,
         target,
+        pageId,
       });
       responsePromises.set(requestId, resolve);
       setTimeout(() => {
         if (responsePromises.has(requestId)) {
           responsePromises.delete(requestId);
-          console.error("Request timed out: " + requestId + " for key: " + key);
+          console.error("Request timed out: " + requestId + " for key: " + key, data, target);
         }
         resolve([]);
-      }, 5000);
+      }, 1000);
     }).then((response) => {
       if (closed) {
         return;
@@ -260,13 +260,13 @@ function createBus(projectKey, handleRemoteDispatch) {
     return responses;
   }
 
-  const bus = function bus(keyOrCallback, dataOrTarget, maybeTarget) {
+  const bus = function bus(keyOrCallback, data, target, pageId) {
     if (typeof keyOrCallback === "function") {
       return handleSubscription(projectKey, keyOrCallback);
     } else if (typeof dataOrTarget === "function") {
       return handleSubscription(keyOrCallback, dataOrTarget);
     } else {
-      return alwaysDispatchFromBus(keyOrCallback, dataOrTarget, maybeTarget); // handleDispatch(keyOrCallback, dataOrTarget, maybeTarget);
+      return alwaysDispatchFromBus(keyOrCallback, data, target, pageId);
     }
   };
 
@@ -300,48 +300,67 @@ function InterBus(sendExternalMessage) {
 
   this.receiveExternalMessage = async (message, sendResponse = true) => {
     if (message.requestId) {
-      const channelResponses = [];
+      const channelResponsesByPage = new Map();
+
       const projectKey = extractProjectKey(message.key);
       const parsedKey = parseKey(message.key, projectKey);
 
-      for (const [channelKey, channel] of channels) {
+      for (const [channelKey, clientChannels] of channels) {
         if (!parsedKey.isPrivate || channelKey === projectKey) {
-          channelResponses.push(
-            new Promise((resolve) => {
-              projectRequestPromises.set(
-                channelKey + "_" + message.requestId,
-                resolve
+          for (const [pageId, channel] of clientChannels) {
+            if (pageId !== message.pageId && message.pageId !== "*") {
+              continue;
+            }
+            if (!channelResponsesByPage.has(pageId)) {
+              channelResponsesByPage.set(pageId, []);
+            }
+            const channelResponses = channelResponsesByPage.get(pageId);
+
+            const responseKey = `${channelKey}_${pageId}_${message.requestId}`;
+
+            if (!projectRequestPromises.has(responseKey)) {
+              projectRequestPromises.set(responseKey, []);
+              channelResponses.push(
+                new Promise((resolve) => {
+                  projectRequestPromises.set(responseKey, [resolve]);
+                  // channel(message);
+                  channel({ ...message, pageId: pageId });
+                })
               );
-              channel(message);
-            })
-          );
+            }
+          }
         }
       }
 
-      if (channelResponses.length > 0) {
-        const timeout = new Promise((resolve) => {
-          setTimeout(() => {
-            resolve([]);
-          }, 5000);
-        });
-        const response = await Promise.race([
-          Promise.all(channelResponses),
-          timeout,
-        ]);
-        if (sendResponse) {
-          sendExternalMessage({
-            responseId: message.requestId,
-            data: response.flat(),
+      const responsesByPage = (await Promise.all(Array.from(channelResponsesByPage.keys()).map(async (pageId) => {
+        const channelResponses = channelResponsesByPage.get(pageId);
+        if (channelResponses.length > 0) {
+          const timeout = new Promise((resolve) => {
+            setTimeout(() => {
+              resolve([]);
+            }, 1000);
           });
-        } else {
-          return response.flat();
+          const response = await Promise.race([
+            Promise.all(channelResponses),
+            timeout,
+          ]);
+          return [pageId, await response.flat()];
         }
-      }
+        return [pageId, []];
+      }))).reduce((acc, [pageId, response]) => {
+        acc[pageId] = response;
+        return acc;
+      }, {})
+
+      sendExternalMessage({
+        responseId: message.requestId,
+        data: responsesByPage,
+      });
     } else if (message.responseId) {
-      const requestId = message.responseId;
-      const resolve = projectRequestPromises.get("external_" + requestId);
+      const requestId = "external_" + message.responseId;
+      const resolve = projectRequestPromises.get(requestId);
       if (resolve) {
-        projectRequestPromises.delete("external_" + requestId);
+        projectRequestPromises.delete(requestId);
         resolve(message.data);
       }
     }
@@ -349,68 +368,136 @@ function InterBus(sendExternalMessage) {
 
   this.receiveInternalMessage = async (projectKey, message) => {
     if (message.requestId) {
-      const channelResponses = [];
+      const channelResponsesByPage = new Map();
       const parsedKey = parseKey(message.key, projectKey);
 
-      for (const [channelKey, channel] of channels) {
+      for (const [channelKey, clientChannels] of channels) {
         if (!parsedKey.isPrivate && channelKey !== projectKey) {
-          channelResponses.push(
-            new Promise((resolve) => {
-              projectRequestPromises.set(
-                channelKey + "_" + message.requestId,
-                resolve
-              );
+          for (const [pageId, channel] of clientChannels) {
+            if (pageId !== message.pageId && message.pageId !== "*") {
+              continue;
+            }
+            if (!channelResponsesByPage.has(pageId)) {
+              channelResponsesByPage.set(pageId, []);
+            }
+            const channelResponses = channelResponsesByPage.get(pageId);
 
-              channel(message);
-            })
-          );
+            const responseKey = `${channelKey}_${pageId}_${message.requestId}`;
+            if (!projectRequestPromises.has(responseKey)) {
+              projectRequestPromises.set(responseKey, []);
+              channelResponses.push(
+                new Promise((resolve) => {
+                  projectRequestPromises.set(responseKey, [resolve]);
+                  channel({ ...message, pageId: pageId });
+                })
+              );
+            }
+          }
         }
       }
 
       let externalPromise;
       if (!parsedKey.isLocal) {
-        sendExternalMessage(message);
         externalPromise = new Promise((resolve) => {
-          projectRequestPromises.set("external_" + message.requestId, resolve);
+          projectRequestPromises.set("external_" + message.requestId, (data) => {
+            resolve(data)
+          });
         });
+        sendExternalMessage(message);
       }
 
-      const timeout = new Promise((resolve) => {
-        setTimeout(() => {
-          resolve([]);
-        }, 5000);
-      });
-      const externalResponses = externalPromise ? externalPromise : [];
-      const response = await Promise.race([
-        Promise.all([...channelResponses, externalResponses]),
-        timeout,
-      ]);
+      const internalResponsesByPage = (await Promise.all(Array.from(channelResponsesByPage.keys()).map(async (pageId) => {
+        const channelResponses = channelResponsesByPage.get(pageId);
+
+        const timeout = new Promise((resolve) => {
+          setTimeout(() => {
+            resolve([]);
+          }, 1000);
+        });
+        const response = await Promise.race([
+          Promise.all(channelResponses),
+          timeout,
+        ]);
+        return [pageId, response.flat()];
+      }))).reduce((acc, [pageId, response]) => {
+        acc[pageId] = response;
+        return acc;
+      }, {})
+      const externalResponse = await externalPromise;
+      const internalResponses = Object.entries(internalResponsesByPage).map(([pageId, response]) => {
+        return response.map((response) => {
+          return {
+            pageId,
+            ...response,
+            local: true,
+          }
+        }); 
+      }).flat();
+      const externalResponses = Object.entries(externalResponse).map(([pageId, responses]) => {
+        return responses.map((response) => {
+          return {
+            pageId,
+            ...response,
+            local: false,
+          }
+        });
+      }).flat();
+
+      const responses = [...internalResponses, ...externalResponses];
 
       const channel = channels.get(projectKey);
-      if (channel) {
-        channel({
-          responseId: message.requestId,
-          data: response.flat(),
+
+      if (message.pageId !== '*') {
+        const channelPage = channel.get(message.pageId);
+        if (channelPage) {
+          channelPage({
+            responseId: message.requestId,
+            data: responses,
+            pageId: message.originPageId ?? message.pageId,
+          });
+        }
+      } else {
+        channel.forEach((channelPage) => {
+          channelPage({
+            responseId: message.requestId,
+            data: responses,
+            pageId: message.pageId,
+          });
         });
       }
     } else if (message.responseId) {
-      const requestId = message.responseId;
-      const resolve = projectRequestPromises.get(projectKey + "_" + requestId);
+      const responseKey = `${projectKey}_${message.pageId}_${message.responseId}`;
 
+      const resolve = projectRequestPromises.get(responseKey)?.shift();
       if (resolve) {
         resolve(message.data);
-        projectRequestPromises.delete(projectKey + "_" + requestId);
+        if (projectRequestPromises.get(responseKey).length === 0) {
+          projectRequestPromises.delete(responseKey);
+        }
       } else {
         console.error(
           "No resolve function found for",
-          projectKey + "_" + requestId
+          responseKey,
+          message
         );
       }
     }
   };
 
-  this.registerChannel = (key, bus) => {
-    channels.set(key, bus);
+  this.registerChannel = (key, bus, pageId) => {
+    if (!channels.has(key)) {
+      channels.set(key, new Map());
+    }
+    channels.get(key).set(pageId, bus);
+  };
+
+  this.unregisterChannel = (key, pageId) => {
+    if (channels.has(key)) {
+      channels.get(key).delete(pageId);
+      if (channels.get(key).size === 0) {
+        channels.delete(key);
+      }
+    }
   };
 
   return this;
@@ -697,7 +784,7 @@ class WebSocketServer extends EventEmitter {
 
 // <session>
 
-function initModule(projectKey, session) {
+function initModule(projectKey, session, pageId) {
   const sessionId = session.sessionId;
   // Initialize the server module for this session
   if (serverModules.has(projectKey)) {
@@ -707,8 +794,8 @@ function initModule(projectKey, session) {
         message.target = sessionId;
       }
       child.send(message);
-    });
-    child.send({ key: projectKey, data: "connect", target: sessionId });
+    }, pageId);
+    child.send({ key: projectKey, data: "connect", target: sessionId, pageId });
   }
 };
 
@@ -768,6 +855,18 @@ function getMainClientCode() {
 `;
 }
 
+function getSharedWorkerCode() {
+  const parseKey = extractCode("parsekey");
+  const interBus = extractCode("interbus");
+  const sharedWorkerCode = extractCode("webworker");
+
+  return `
+    ${parseKey}
+    ${interBus}
+    (${sharedWorkerCode})()
+`;
+}
+
 function createHttpServer(proxyPorts) {
   return http.createServer((req, res) => {
     const urlParts = req.url.split("/");
@@ -775,6 +874,10 @@ function createHttpServer(proxyPorts) {
 
     if (req.url === "/") {
       serveMainPage(res);
+    } else if (req.url === "/websocket-worker.js") {
+      res.writeHead(200, { "Content-Type": "application/javascript" });
+      res.end(getSharedWorkerCode());
+
     } else if (projectKeys.has(projectKey)) {
       if (req.url.startsWith(`/${projectKey}/api`) || req.url.startsWith(`/${projectKey}/p/`)) {
         serveApiRequest(req, res, projectKey, proxyPorts);
@@ -1502,11 +1605,11 @@ async function handleWebSocketMessage(messageString, session) {
   const message = JSON.parse(messageString.toString());
 
   if (message.data === "connect") {
-    initModule(message.key, session);
+    initModule(message.key, session, message.pageId);
   } else if (message.data === 'disconnect') {
     const child = serverModules.get(message.key);
     if (child) {
-      child.send({ key: message.key, data: "disconnect", target: session.sessionId });
+      child.send({ key: message.key, data: "disconnect", target: session.sessionId, pageId: message.pageId });
     }
   } else {
     if (message.target === "*") {
@@ -1515,7 +1618,7 @@ async function handleWebSocketMessage(messageString, session) {
       if (!message.target) {
         message.target = session.sessionId;
       }
-      session.interBus.receiveExternalMessage(message);
+      await session.interBus.receiveExternalMessage(message);
     }
   }
 }
@@ -1596,13 +1699,14 @@ function handleChildProcessMessage(message, project, child) {
 }
 
 function broadcastMessageToSessions(message, sourceProject) {
-  sessions.forEach((session) => {
+  sessions.forEach(async (session) => {
     if (session.ws && (message.target === "*" || session.sessionId === message.target)) {
       const messageToSend = { ...message };
       if (message.target === "*") {
         messageToSend.target = session.sessionId;
+        messageToSend.pageId = "*";
       }
-      session.interBus.receiveInternalMessage(sourceProject, messageToSend);
+      await session.interBus.receiveInternalMessage(sourceProject, messageToSend);
     }
   });
 }
@@ -1625,7 +1729,14 @@ function registerModule(child, project) {
 
 // <client>
 function client(projectKey) {
+  let pageId;
+  let queue = [];
   const [bus, handleExternal] = createBus(projectKey, (message) => {
+    if (!pageId) {
+      queue.push(message);
+      return;
+    }
+    message.pageId = pageId;
     broadcastChannel.postMessage(message);
   });
   window.bus = bus;
@@ -1633,119 +1744,285 @@ function client(projectKey) {
   const broadcastChannel = new BroadcastChannel(projectKey);
   broadcastChannel.onmessage = async (event) => {
     const message = event.data;
+    if (!message.interBus || (!message.requestId && !message.responseId)) {
+      return;
+    }
+
+    if (message.pageId !== pageId) {
+      return;
+    }
+
     const res = await handleExternal(message);
     if (!message.responseId) {
       broadcastChannel.postMessage({
         responseId: message.requestId,
         data: res,
+        pageId
       });
     }
   };
-  broadcastChannel.postMessage({ key: projectKey, data: "connect" });
 
-  window.addEventListener('beforeunload', () => {
-    broadcastChannel.postMessage({ key: projectKey, data: "disconnect" });
-  });
+  function initClient(receivedPageId) {
+    pageId = receivedPageId;
+
+    broadcastChannel.postMessage({ key: projectKey, data: "connect", pageId });
+
+    window.addEventListener('beforeunload', () => {
+      broadcastChannel.postMessage({ key: projectKey, data: "disconnect", pageId });
+    });
+
+    queue.forEach(message => {
+      message.pageId = pageId;
+      broadcastChannel.postMessage(message);
+    });
+  }
+
+  window.addEventListener('message', function (event) {
+    if (event.data.type === 'setPageId' && !pageId) {
+      initClient(event.data.pageId);
+    }
+  }, false);
+
+  window.parent.postMessage({ type: 'getPageId' }, '*');
 }
 // </client>
 
-// <mainclient>
-function mainClient(projectKeys) {
+// <webworker>
+function webWorker() {
   let ws;
-  let queue = [];
-  const projectChannels = new Map();
+  const clients = new Set();
+  const broadcastChannels = new Map();
+  const clientInstances = new Map();
+  let interBus;
   let unloading = false;
+  let queue = [];
 
-  const ibus = new InterBus((message) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(message));
-    } else {
-      queue.push(message);
+  function connectWebSocket() {
+    ws = new WebSocket(`ws://${self.location.host}`);
+    ws.onopen = () => {
+      if (queue.length > 0) {
+        queue.forEach(message => ws.send(JSON.stringify(message)));
+        queue = [];
+      }
+      broadcast({ type: 'ready' });
     }
-  });
-
-  function connectToServer() {
-    ws = new WebSocket(`ws://${location.host}`);
-    ws.onopen = handleWebSocketOpen;
-    ws.onmessage = handleWebSocketMessage;
-    ws.onclose = handleWebSocketClose;
-    ws.onerror = handleWebSocketError;
+    ws.onclose = () => {
+      broadcast({ type: 'close' });
+      setTimeout(connectWebSocket, 3000);
+    };
+    ws.onerror = (error) => broadcast({ type: 'error', error });
+    ws.onmessage = (event) => handleWebSocketMessage(event.data);
   }
 
-  function handleWebSocketOpen() {
-    console.log("Main page WebSocket connection opened");
-    flushQueue();
+  function broadcast(message) {
+    clients.forEach(client => client.postMessage(message));
   }
 
-  function flushQueue() {
-    const messages = queue;
-    queue = [];
-    messages.forEach((message) => ws.send(JSON.stringify(message)));
+  function handleWebSocketMessage(data) {
+    const message = JSON.parse(data);
+    interBus.receiveExternalMessage(message);
   }
 
-  function handleWebSocketMessage(event) {
-    const message = JSON.parse(event.data);
-    if (message.data === "connect") {
-    } else {
-      ibus.receiveExternalMessage(message);
+  function setupBroadcastChannel(key) {
+    if (!broadcastChannels.has(key)) {
+      const channel = new BroadcastChannel(key);
+      channel.onmessage = (event) => handleProjectChannelMessage(key, event);
+      broadcastChannels.set(key, channel);
     }
   }
 
-  function handleWebSocketClose() {
-    setTimeout(connectToServer, 3000);
+  function connectClientInstance(key, pageId) {
+    if (!clientInstances.has(key)) {
+      clientInstances.set(key, new Set());
+    }
+    clientInstances.get(key).add(pageId);
+
+    interBus.registerChannel(key, (message) => {
+      message.interBus = true;
+      broadcastChannels.get(key).postMessage(message);
+    }, pageId);
   }
 
-  function handleWebSocketError(error) {
-    console.error("Main page WebSocket error:", error);
-  }
-
-  function setupProjectChannels(projectKeys) {
-    projectKeys.forEach(setupSingleProjectChannel);
-  }
-
-  function setupSingleProjectChannel(key) {
-    if (projectChannels.has(key)) return;
-
-    const channel = new BroadcastChannel(key);
-    channel.onmessage = (event) => handleProjectChannelMessage(key, event);
-    projectChannels.set(key, channel);
-
-    ibus.registerChannel(key, (message) => {
-      channel.postMessage(message);
+  function setupInterBus() {
+    interBus = new InterBus((message) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(message));
+      }
     });
   }
 
   function handleProjectChannelMessage(sourceKey, event) {
     const message = event.data;
+    const pageId = message.pageId;
+
+    if (!pageId) {
+      console.error('Received message without pageId', message);
+      return;
+    }
+
     if (message.data === "connect" && message.key === sourceKey) {
+      connectClientInstance(sourceKey, pageId);
       if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ key: sourceKey, data: "connect" }));
+        ws.send(JSON.stringify({ key: sourceKey, data: "connect", pageId: pageId }));
       } else {
-        queue.push({ key: sourceKey, data: "connect" });
+        queue.push({ key: sourceKey, data: "connect", pageId: pageId });
       }
       return;
     } else if (message.data === "disconnect" && message.key === sourceKey) {
-      setTimeout(() =>{
+      setTimeout(() => {
         if (unloading) return;
-        ws.send(JSON.stringify({ key: sourceKey, data: "disconnect" }));
-      })
+        ws.send(JSON.stringify({ key: sourceKey, data: "disconnect", pageId: pageId }));
+      });
+      if (clientInstances.has(sourceKey)) {
+        clientInstances.get(sourceKey).delete(pageId);
+        if (clientInstances.get(sourceKey).size === 0) {
+          clientInstances.delete(sourceKey);
+        }
+      }
+      interBus.unregisterChannel(sourceKey, pageId);
       return;
     }
     if (message.target === "*") {
       throw new Error("Client cannot handle broadcast messages, " + JSON.stringify(message));
     }
-    ibus.receiveInternalMessage(sourceKey, message);
+    if (message.pageId && message.pageId !== pageId) {
+      console.error('Ignoring message for different pageId', message);
+      return;
+    }
+    interBus.receiveInternalMessage(sourceKey, message);
+  }
+
+  self.onconnect = (e) => {
+    const port = e.ports[0];
+    clients.add(port);
+
+    if (!ws || ws.readyState === WebSocket.CLOSED) {
+      connectWebSocket();
+    } else {
+      port.postMessage({ type: 'ready' });
+    }
+
+    if (!interBus) {
+      setupInterBus();
+    }
+
+    port.onmessage = (event) => {
+      const { type, data } = event.data;
+      switch (type) {
+        case 'setupChannel':
+          setupBroadcastChannel(data);
+          break;
+        case 'send':
+          handleProjectChannelMessage(data.sourceKey, { data: data.message });
+          break;
+      }
+    };
+
+    port.start();
+  };
+
+  self.onclose = () => {
+    unloading = true;
+    clients.forEach(client => client.close());
+    ws.close();
+    broadcastChannels.forEach(channel => channel.close());
+  }
+}
+// </webworker>
+
+// <mainclient>
+function mainClient(projectKeys) {
+  let worker;
+  let workerReady = false;
+  let messageQueue = [];
+  let unloading = false;
+  let channels = [];
+
+  const pageId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+  window.addEventListener('message', function (event) {
+    if (event.data.type === 'getPageId') {
+      // Ensure the message is from a child iframe
+      if (event.source && event.source !== window) {
+        event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
+      }
+    }
+  }, false);
+
+  function setupWorker() {
+    worker = new SharedWorker('websocket-worker.js');
+    worker.port.onmessage = handleWorkerMessage;
+    worker.port.start();
+
+    // Setup channels for all project keys
+    projectKeys.forEach(key => {
+      sendOrQueueMessage({ type: 'setupChannel', data: key });
+      setupSingleProjectChannel(key);
+    });
+
+    // Signal that we're ready to receive the 'ready' message
+    worker.port.postMessage({ type: 'ready' });
+  }
+
+  function sendOrQueueMessage(message) {
+    if (workerReady && worker) {
+      worker.port.postMessage(message);
+    } else {
+      messageQueue.push(message);
+    }
+  }
+
+  function flushMessageQueue() {
+    while (messageQueue.length > 0) {
+      const message = messageQueue.shift();
+      worker.port.postMessage(message);
+    }
+  }
+
+  function handleWorkerMessage(event) {
+    const { type, data } = event.data;
+    switch (type) {
+      case 'ready':
+        workerReady = true;
+        flushMessageQueue();
+        cleanupBroadcastChannels();
+        break;
+      case 'close':
+        console.log("WebSocket connection closed");
+        break;
+      case 'error':
+        console.error("WebSocket error:", data);
+        break;
+      case 'message':
+        // Handle incoming messages if needed
+        break;
+    }
+  }
+
+  function setupSingleProjectChannel(key) {
+    const channel = new BroadcastChannel(key);
+    channel.onmessage = (event) => handleProjectChannelMessage(key, event);
+    channels.push(channel);
+  }
+
+  function handleProjectChannelMessage(sourceKey, event) {
+    const message = event.data;
+    sendOrQueueMessage({ type: 'send', data: { sourceKey, message } });
+  }
+
+  function cleanupBroadcastChannels() {
+    channels.forEach(channel => {
+      channel.onmessage = null;
+      channel.close();
+    });
+    channels = [];
   }
 
   window.addEventListener('beforeunload', () => {
     unloading = true;
   });
 
-  // Initialize the connection
-  connectToServer();
-
-  // Setup initial project channels
-  setupProjectChannels(projectKeys);
+  // Initialize the worker
+  setupWorker();
 }
 // </mainclient>
 
@@ -1796,18 +2073,41 @@ function handleSandboxedMode() {
       messageQueue.push(message);
       return;
     }
+    const pageId = message.pageId;
 
     if (message.data === "connect") {
-      handleNewConnection(message);
+      handleNewConnection(message, pageId);
     } else if (message.data === "disconnect") {
-      const [,, cleanup] = sessions.get(message.target) || [];
+      const [, , cleanup] = sessions.get(`${message.target}_${pageId}`) || [];
       if (cleanup) {
         cleanup();
       }
     } else {
-      const [bus, handleExternal] = sessions.get(message.target) || [];
+      const [bus, handleExternal] = sessions.get(`${message.target}_${message.pageId}`) || [];
       if (!bus) {
-        console.error("No session found for target", message.target);
+        let responses = [];
+        for (const [key, [bus, handleExternal]] of sessions.entries()) {
+          const response = handleExternal(message);
+          if (response && !message.responseId) {
+            responses.push(response);
+          }
+        }
+        if (responses.length && !message.responseId) {
+          process.send({
+            responseId: message.requestId,
+            data: (await Promise.all(responses)).flat(),
+            target: message.target,
+            pageId,
+          });
+        } else {
+          process.send({
+            responseId: message.requestId,
+            data: [],
+            target: message.target,
+            pageId,
+          });
+        }
+
         return;
       }
       const res = await handleExternal(message);
@@ -1816,51 +2116,52 @@ function handleSandboxedMode() {
           responseId: message.requestId,
           data: res,
           target: message.target,
+          pageId,
         });
       }
     }
   }
 
-  function handleNewConnection(message) {
+  function handleNewConnection(message, pageId) {
     const cleanups = [];
     const sessionId = message.target;
     const [bus, handleExternal, closeBus] = createBus(projectKey, (payload) => {
       if (!payload.target || payload.target === true) {
         payload.target = sessionId;
       }
-      payload.source = sessionId;
+      payload.pageId = payload.pageId ?? pageId;
+      payload.originPageId = pageId;
       process.send(payload);
     });
     const cleanupSession = () => {
-      sessions.delete(sessionId);
+      sessions.delete(`${sessionId}_${pageId}`);
       cleanups.forEach((cleanup) => {
         const index = cleanupCallbacks.indexOf(cleanup);
         if (index !== -1) {
           cleanupCallbacks.splice(index, 1);
         }
-        cleanup()
+        cleanup();
       });
       closeBus();
     };
-    sessions.set(sessionId, [bus, handleExternal, cleanupSession]);
-
+    sessions.set(`${sessionId}_${pageId}`, [bus, handleExternal, cleanupSession]);
 
     for (let [key, func] of Object.entries(serverModule.exports)) {
       if (typeof func === 'function' && key !== 'default') {
         if (key.startsWith('_')) {
           key = key.slice(1);
-          bus(key, (payload) => func(payload.data, sessionId, bus));
+          bus(key, (payload) => func(payload.data, sessionId, pageId, bus));
         } else {
-          bus(key, (payload) => func(payload.data, sessionId, bus));
+          bus(key, (payload) => func(payload.data, sessionId, pageId, bus));
           if (!key.startsWith(projectKey + ".")) {
             key = projectKey + '.' + key;
           }
-          bus("*." + key, (payload) => func(payload.data, sessionId, bus));
+          bus("*." + key, (payload) => func(payload.data, sessionId, pageId, bus));
         }
       }
     }
 
-    const cleanup = serverModule.moduleCreator(bus, sessionId);
+    const cleanup = serverModule.moduleCreator(bus, sessionId, pageId) ?? (() => { });
     cleanups.push(cleanup);
     if (typeof cleanup === 'function') {
       cleanupCallbacks.push(cleanup);
