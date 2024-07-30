@@ -17,7 +17,7 @@ function extractCode(tag) {
 
 // <parsekey>
 function extractProjectKey(key) {
-  if (key.startsWith("!") || key.startsWith("@") || key.startsWith("#")) {
+  if (key.startsWith("_") || key.startsWith("$") || key.startsWith("#")) {
     key = key.slice(1);
   }
   const keyParts = key.split(".");
@@ -30,10 +30,10 @@ function parseKey(key, projectKey) {
   let isLocal = false;
   let isCrossChannel = false;
 
-  if (key.startsWith("!")) {
+  if (key.startsWith("_")) {
     normalizedKey = key.slice(1);
     isPrivate = true;
-  } else if (key.startsWith("@")) {
+  } else if (key.startsWith("$")) {
     normalizedKey = key.slice(1);
     isLocal = true;
   } else if (key.startsWith("#")) {
@@ -53,9 +53,9 @@ function parseKey(key, projectKey) {
 
   if (projectKey) {
     if (isPrivate) {
-      normalizedKey = "!" + normalizedKey;
+      normalizedKey = "_" + normalizedKey;
     } else if (isLocal) {
-      normalizedKey = "@" + normalizedKey;
+      normalizedKey = "$" + normalizedKey;
     }
   }
 
@@ -140,7 +140,7 @@ function createBus(projectKey, handleRemoteDispatch) {
         return;
       }
       let { normalizedKey } = parseKey(key, projectKey);
-      if (normalizedKey.startsWith("!") || normalizedKey.startsWith("@")) {
+      if (normalizedKey.startsWith("_") || normalizedKey.startsWith("$")) {
         normalizedKey = normalizedKey.slice(1);
       }
       let defaultValue = response.find((r) => r.key === normalizedKey)?.data;
@@ -263,8 +263,8 @@ function createBus(projectKey, handleRemoteDispatch) {
   const bus = function bus(keyOrCallback, data, target, pageId) {
     if (typeof keyOrCallback === "function") {
       return handleSubscription(projectKey, keyOrCallback);
-    } else if (typeof dataOrTarget === "function") {
-      return handleSubscription(keyOrCallback, dataOrTarget);
+    } else if (typeof data === "function") {
+      return handleSubscription(keyOrCallback, data);
     } else {
       return alwaysDispatchFromBus(keyOrCallback, data, target, pageId);
     }
@@ -404,6 +404,8 @@ function InterBus(sendExternalMessage) {
           });
         });
         sendExternalMessage(message);
+      } else {
+        externalPromise = Promise.resolve([]);
       }
 
       const internalResponsesByPage = (await Promise.all(Array.from(channelResponsesByPage.keys()).map(async (pageId) => {
@@ -1112,7 +1114,7 @@ async function serveApiRequest(req, res, projectKey, proxyPorts) {
   const requestKey = req.url.substring(1).split('?')[0].replaceAll("/", ".");
 
   const message = {
-    key: "!" + requestKey,
+    key: "_" + requestKey,
     data: {
       method: req.method,
       query: queryParams,
@@ -1440,6 +1442,8 @@ function injectClientBusCode(
           if (typeof func === 'function' && key !== 'default') {
             if (key.startsWith('_')) {
               key = key.slice(1);
+              window.bus(key, (payload) => func(payload.data));
+            } else if (key.startsWith("$")) {
               window.bus(key, (payload) => func(payload.data));
             } else {
               window.bus(key, (payload) => func(payload.data));
@@ -2150,13 +2154,15 @@ function handleSandboxedMode() {
       if (typeof func === 'function' && key !== 'default') {
         if (key.startsWith('_')) {
           key = key.slice(1);
-          bus(key, (payload) => func(payload.data, sessionId, pageId, bus));
+          bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
+        } else if (key.startsWith('$')) {
+          bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
         } else {
-          bus(key, (payload) => func(payload.data, sessionId, pageId, bus));
+          bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
           if (!key.startsWith(projectKey + ".")) {
             key = projectKey + '.' + key;
           }
-          bus("*." + key, (payload) => func(payload.data, sessionId, pageId, bus));
+          bus("*." + key, (payload) => func(payload.data, bus, sessionId, pageId));
         }
       }
     }

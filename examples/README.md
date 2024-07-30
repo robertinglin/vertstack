@@ -14,5 +14,14 @@ npx vertstack chat
 or
 
 ```sh
-../cli.js chat
+node ../cli.js chat
+```
+
+## Messages
+
+More complex example showing how to use different message types
+
+```sh
+cd ./messages
+node ../../cli.js counter logger main notifier
 ```

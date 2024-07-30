@@ -101,34 +101,6 @@ npx VertStack --install --port=3456 module1 module2
 
 After installation, you don't need to specify the modules again when running the scripts. The installation process saves your configuration for future use.
 
-### Writing Server-Side Code
-
-In each module's `server.js` file:
-
-```javascript
-module.exports = function (bus, sessionId) {
-  // Your server-side logic here
-  bus("some.event", { data: "Hello from server!" });
-
-  return function cleanup() {
-    // Optional cleanup function
-  };
-};
-```
-
-### Writing Client-Side Code
-
-In each module's `client.js` file:
-
-```javascript
-// The 'bus' function is globally available
-bus("some.event", (payload) => {
-  console.log(payload.data);
-});
-
-bus("client.event", { message: "Hello from client!" });
-```
-
 ## API Reference
 
 ### `bus(key, data)` or `bus(key, callback)`
@@ -139,10 +111,10 @@ bus("client.event", { message: "Hello from client!" });
 
 #### Special Keys
 
-- Use `!` prefix for private messages (e.g., `'!privateEvent'`)
+- Use `_` prefix for private messages (e.g., `'_privateEvent'`)
 - Use `*` for project-wide events (e.g., `'*.globalEvent'`)
 - Use `#` prefix for cross-channel communication (e.g., `'#otherModule.event'`)
-- Use `@` prefix for local messages (e.g., `'@localEvent'`)
+- Use `$` prefix for local messages (e.g., `'$localEvent'`)
 
 ### Server-Side Module Export
 
@@ -225,92 +197,11 @@ No additional configuration is required; this feature works automatically for al
 
 ## Examples
 
-### Chat Module
-
-Here's an example of a simple chat module using VertStack:
-
-server.js:
-
-```javascript
-const activeUsers = new Map();
-
-module.exports = function (bus, sessionId) {
-  const broadcastMessage = (type, data) => {
-    activeUsers.forEach((_, userId) => {
-      if (userId !== sessionId) {
-        bus(type, data, userId);
-      }
-    });
-  };
-
-  const addUser = (username) => {
-    activeUsers.set(sessionId, username);
-    broadcastMessage('userJoined', { userId: sessionId, username });
-  };
-
-  const removeUser = () => {
-    const username = activeUsers.get(sessionId);
-    activeUsers.delete(sessionId);
-    broadcastMessage('userLeft', { userId: sessionId, username });
-  };
-
-  bus('chat.join', (payload) => {
-    addUser(payload.data.username);
-    bus('!chat.joinSuccess', { userId: sessionId, activeUsers: Array.from(activeUsers) }, sessionId);
-  });
-
-  bus('chat.message', (payload) => {
-    const username = activeUsers.get(sessionId);
-    broadcastMessage('message', { userId: sessionId, username, text: payload.data.text });
-  });
-
-  return () => {
-    removeUser();
-  };
-};
-```
-
-client.js:
-
-```javascript
-let myUserId = null;
-
-function joinChat(username) {
-  bus('chat.join', { username });
-}
-
-function sendMessage(text) {
-  if (myUserId) {
-    bus('chat.message', { text });
-  } else {
-    console.error('Not connected to chat. Please join first.');
-  }
-}
-
-bus('!chat.joinSuccess', (payload) => {
-  myUserId = payload.data.userId;
-  console.log('Successfully joined chat');
-  updateUserList(payload.data.activeUsers);
-});
-
-bus('!chat.userJoined', (payload) => {
-  console.log(`${payload.data.username} has joined the chat`);
-  addUserToList(payload.data.userId, payload.data.username);
-});
-
-bus('!chat.userLeft', (payload) => {
-  console.log(`${payload.data.username} has left the chat`);
-  removeUserFromList(payload.data.userId);
-});
-
-bus('!chat.message', (payload) => {
-  displayMessage(payload.data.username, payload.data.text);
-});
-```
+Examples can be found under the examples folder in Github.
 
 ## Cross-Channel Communication
 
-The `#` prefix allows you to send messages to specific channels (modules) from any other module. This is useful for inter-module communication without broadcasting to all modules.
+The `#` prefix allows you to send messages to specific channels (modules) from any other module. This is useful for inter-module communication without broadcasting to all modules. By default exported functions will subscribe to private and global scope.
 
 ### Usage:
 
@@ -318,200 +209,64 @@ The `#` prefix allows you to send messages to specific channels (modules) from a
 // Send a message to the 'userStats' module
 bus("#userStats.update", { activeUsers: 10 });
 
-// Listen for messages from other modules
-bus("#otherModule.event", (payload) => {
-  // Handle the event
-});
+
+// userStats exports a handler
+export const update = (payload) => {
+  // handle the event
+}
 ```
 
 ## Local Message Handling
 
-The `@` prefix is used for local messages that should not be sent over the network. This is useful for optimizing performance and keeping certain logic contained within either the client or server side.
+The `$` prefix is used for local messages that should not be sent over the network. This is useful for optimizing performance and keeping certain logic contained within either the client or server side.
 
 ### Usage:
 
 ```javascript
 // Send a local message (client-side or server-side)
-bus("@localEvent", { someData: "value" });
+bus("$localEvent", { someData: "value" });
 
-// Listen for local messages
-bus("@localEvent", (payload) => {
-  // Handle the local event
-});
+export const $localEvent = (payload) => {
+    // Handle the local event
+};
 ```
 
-## Private Message Handling
+## Vertical Message Handling
 
-The `!` prefix is used for private messages that should only be received by the intended recipient. This is useful for sending sensitive information or implementing secure communication channels within your application.
+The `_` prefix is used for server to client messages in a single module. If prefixed with _ only the server or client module will receive the message.
 
 ### Usage:
 
 ```javascript
-// Send a private message to a specific session
-bus("!privateMessage", { sensitiveData: "value" }, targetSessionId);
+// Send a vertical message
+bus("_verticalMessage", { sensitiveData: "value" }, targetSessionId);
 
-// Listen for private messages
-bus("!privateMessage", (payload) => {
+// Listen for vertical messages
+export const _verticalMessage = (payload) => {
   // Handle the private message
   console.log("Received private message:", payload.data);
-});
+};
 ```
 
-### Key Features of Private Messages:
+## Listening to all messages
 
-1. **Session-Specific:** Private messages are only delivered to the specified session. Other sessions, even within the same module, will not receive these messages.
-
-2. **Secure Communication:** Use private messages for transmitting sensitive information like authentication tokens, personal data, or any content that should not be broadcast widely.
-
-3. **Namespacing:** You can use namespacing with private messages (e.g., `'!module.privateEvent'`) to organize your private events within modules.
-
-4. **Server-to-Client and Client-to-Server:** Private messages can be sent in both directions, allowing secure bidirectional communication.
-
-5. **No Cross-Channel Leakage:** Private messages are contained within their intended channel and will not leak to other modules, even when using cross-channel communication.
-
-### Example: Secure User Authentication
-
-Here's an example of how to use private messages for a secure user authentication process:
-
-server.js:
+In the event that you want to subscribe to all public messages for the session you can use the wildcard `*` prefix directly on the bus.  
 
 ```javascript
-module.exports = function (bus, sessionId) {
-  const users = new Map();
-
-  bus("auth.login", (payload) => {
-    const { username, password } = payload.data;
-    if (authenticateUser(username, password)) {
-      const token = generateAuthToken(username);
-      users.set(sessionId, { username, token });
-      // Send private message with auth token
-      bus("!auth.success", { token }, sessionId);
-    } else {
-      bus("!auth.failure", { message: "Invalid credentials" }, sessionId);
-    }
+export default (bus, sessionId, pageId) => {
+  bus('*', (payload) => {
+    console.log('Received message', payload);
   });
 
-  bus("!auth.validateToken", (payload) => {
-    const { token } = payload.data;
-    const user = Array.from(users.entries()).find(
-      ([_, u]) => u.token === token
-    );
-    if (user) {
-      bus("!auth.valid", { username: user[1].username }, sessionId);
-    } else {
-      bus("!auth.invalid", {}, sessionId);
-    }
+  bus('*.targetedMessage', (payload) => {
+    console.log('Received message with .targetedMessage as subkek and the payload', payload);
   });
-
-  // ... other server-side logic
-};
-```
-
-client.js:
-
-```javascript
-let authToken = null;
-
-function login(username, password) {
-  bus("auth.login", { username, password });
 }
-
-bus("!auth.success", (payload) => {
-  authToken = payload.data.token;
-  console.log("Successfully authenticated");
-  // Proceed with authenticated actions
-});
-
-bus("!auth.failure", (payload) => {
-  console.error("Authentication failed:", payload.data.message);
-  // Handle login failure (e.g., show error message to user)
-});
-
-function validateToken() {
-  if (authToken) {
-    bus("!auth.validateToken", { token: authToken });
-  }
-}
-
-bus("!auth.valid", (payload) => {
-  console.log("Token is valid for user:", payload.data.username);
-  // Proceed with authenticated actions
-});
-
-bus("!auth.invalid", () => {
-  console.log("Token is invalid or expired");
-  authToken = null;
-  // Handle invalid token (e.g., redirect to login page)
-});
 ```
-
-In this example, sensitive information like authentication tokens is only sent via private messages, ensuring that this data is not accidentally broadcast to other sessions or modules.
-## Automatic Listener Registration
-
-Vertstack now supports automatic registration of listeners based on exported functions. This feature simplifies the process of setting up event handlers in your modules.
-
-### Module Usage
-
-In your module's JavaScript files, simply export the functions you want to register as listeners:
-
-```javascript
-// Global listener (listens to this event from all modules)
-export const joinChat = ({ username }, sessionId, bus) => {
-  // Your implementation here
-  console.log(`User ${username} joined the chat. Session ID: ${sessionId}`);
-};
-
-// Global listener
-export const sendMessage = ({ message, username }, sessionId, bus) => {
-  // Your implementation here
-  console.log(`Message from ${username}: ${message}. Session ID: ${sessionId}`);
-};
-
-// Local listener (listens only to this event from this module)
-export const _updateLocalState = ({ data }) => {
-  // Your implementation here
-  console.log('Updating local state:', data);
-};
-```
-
-Vertstack will automatically register these functions as listeners when the module is loaded. The `sessionId` and `bus` parameters are automatically provided by the system for global listeners.
-
-### How It Works
-
-When you export a function, Vertstack automatically sets up a listener with the same name as the exported function. The behavior differs slightly based on whether the function name has an underscore prefix:
-
-For global listeners (without underscore):
-
-```javascript
-export const joinChat = ({ username }, sessionId, bus) => {...}
-```
-
-is equivalent to:
-
-```javascript
-bus('*.module.joinChat', (payload, sessionId, bus) => joinChat(payload, sessionId, bus))
-bus('module.joinChat', (payload, sessionId, bus) => joinChat(payload, sessionId, bus))
-```
-
-For local listeners (with underscore):
-
-```javascript
-export const _updateLocalState = ({ data }) => {...}
-```
-
-is equivalent to:
-
-```javascript
-bus('updateLocalState', (payload) => _updateLocalState(payload))
-```
-
-Certainly! I'll draft new sections for the readme to cover proxy support, shared worker implementation, and how to use pageId. Here's how we can add these to the existing readme:
-
----
 
 ## Proxy Support
 
-VertStack now supports proxying requests to specific ports for each module. This feature is useful when you need to integrate existing services or APIs with your VertStack application.
+VertStack supports proxying requests to specific ports for each module. This feature is useful when you need to integrate existing services or APIs with your VertStack application.
 
 ### Usage
 
@@ -545,16 +300,7 @@ This request will be proxied to `http://localhost:8080/api/data`.
 
 ## Using pageId
 
-VertStack introduces the concept of `pageId` to manage multiple instances of the same module across different pages or components of a user session.
-
-### What is pageId?
-
-`pageId` is a unique identifier for each instance of a module. It allows you to:
-- Differentiate between multiple instances of the same module.
-- Send messages to specific instances of a module.
-- Handle state separately for each instance.
-
-### How to use pageId
+The concept of `pageId` can be used to manage multiple instances of the same module across different pages or components of a user session.
 
 The `pageId` is automatically generated and managed by VertStack. In your module code, you can access and use it as follows:
 

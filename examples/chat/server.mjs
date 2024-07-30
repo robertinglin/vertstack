@@ -1,6 +1,6 @@
 const activeInstances = new Map();
 
-export const joinChat = async ({ username }, sessionId, pageId, bus) => {
+export const joinChat = async ({ username }, bus, sessionId, pageId) => {
   console.log('User Joined:', username, 'Session:', sessionId, 'Instance:', pageId);
   
   const instanceKey = `${sessionId}_${pageId}`;
@@ -9,7 +9,7 @@ export const joinChat = async ({ username }, sessionId, pageId, bus) => {
   return { success: true, message: `Welcome, ${username}!` };
 };
 
-export const sendMessage = ({ message }, sessionId, pageId, bus) => {
+export const sendMessage = ({ message }, bus, sessionId, pageId) => {
   console.log('received send message request:', message, 'Session:', sessionId, 'Instance:', pageId);
   const instanceKey = `${sessionId}_${pageId}`;
   const username = activeInstances.get(instanceKey);
@@ -20,7 +20,7 @@ export const sendMessage = ({ message }, sessionId, pageId, bus) => {
   return { success: true };
 };
 
-export const privateMessage = ({ to, message }, sessionId, pageId, bus) => {
+export const privateMessage = ({ to, message }, bus, sessionId, pageId) => {
   console.log('received private message request:', to, message, 'Session:', sessionId, 'Instance:', pageId);
   const instanceKey = `${sessionId}_${pageId}`;
   const username = activeInstances.get(instanceKey);
