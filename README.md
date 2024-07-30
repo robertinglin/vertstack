@@ -333,9 +333,6 @@ bus('someEvent', (payload) => {
 - If modules aren't loading, ensure the directory names match the command-line arguments.
 - Check the console for WebSocket connection errors if real-time updates aren't working.
 - Verify that event keys are correctly namespaced to avoid conflicts between modules.
-- When using cross-channel communication with `#`, make sure the target module exists and is listening for the event.
-- If local events with `@` are not being handled, ensure you're listening for them on the correct side (client or server).
-- For private messages with `!`, confirm that the target session exists and that the message is being sent to the correct sessionId.
 - If static files are not being served, check that they are placed in the `public/` or `dist/` directory of the module.
 - For custom layouts, ensure your root `index.html` file uses the correct `<!-- @[MODULENAME] -->` syntax for module placement.
 
