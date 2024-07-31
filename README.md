@@ -248,6 +248,19 @@ export const _verticalMessage = (payload) => {
 };
 ```
 
+## Server side Session subscription
+
+As a server can handle multiple clients it is configured slightly different. It expects a default export that can handle new sessions.
+
+```javascript
+export default (bus, sessionId, pageId) => {
+  console.log('new user', sessionId, pageId)
+  return () => {
+    console.log('called when user leaves');
+  }
+}
+```
+
 ## Listening to all messages
 
 In the event that you want to subscribe to all public messages for the session you can use the wildcard `*` prefix directly on the bus.  
