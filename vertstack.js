@@ -1812,7 +1812,8 @@ function webWorker() {
     }
     ws.onclose = () => {
       broadcast({ type: 'close' });
-      setTimeout(connectWebSocket, 3000);
+      broadcastChannels.forEach(channel => channel.close());
+      self.close();
     };
     ws.onerror = (error) => broadcast({ type: 'error', error });
     ws.onmessage = (event) => handleWebSocketMessage(event.data);
@@ -1991,7 +1992,8 @@ function mainClient(projectKeys) {
         cleanupBroadcastChannels();
         break;
       case 'close':
-        console.log("WebSocket connection closed");
+        console.log("WebSocket connection closed, reloading...");
+        setTimeout(() => location.reload(), 250);
         break;
       case 'error':
         console.error("WebSocket error:", data);
