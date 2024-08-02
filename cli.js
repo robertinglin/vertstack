@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { spawn } = require('node:child_process');
+const { spawn, execSync  } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
@@ -390,6 +390,169 @@ function shouldInstall() {
     return false;
 }
 
+
+function shouldUseElectron() {
+    const electronIndex = args.indexOf('--electron');
+    if (electronIndex !== -1) {
+        args.splice(electronIndex, 1);
+        return true;
+    }
+    return false;
+}
+
+async function installElectronDependencies() {
+    console.log('Installing Electron and required dependencies...');
+    try {
+        execSync('npm install --save-dev electron@latest electron-builder@latest tree-kill@latest', { stdio: 'inherit' });
+        console.log('Electron dependencies installed successfully.');
+    } catch (error) {
+        console.error('Failed to install Electron dependencies:', error);
+        process.exit(1);
+    }
+}
+
+
+async function createElectronMain() {
+    const mainContent = `
+const { app, BrowserWindow } = require('electron');
+const path = require('path');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const treeKill = require('tree-kill');
+
+let mainWindow;
+let serverProcess;
+let serverLogStream;
+
+const portArg = ${JSON.stringify(args)}.find(arg => arg.startsWith('--port='));
+const port = portArg ? parseInt(portArg.split('=')[1]) : 3000; // Default to 3456 if not specified
+
+function createWindow() {
+    mainWindow = new BrowserWindow({
+        width: 800,
+        height: 600,
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false
+        }
+    });
+
+    mainWindow.loadURL(\`http://localhost:\${port}\`);
+
+    mainWindow.on('closed', function () {
+        mainWindow = null;
+        stopServerAndQuit();
+    });
+}
+
+function startServer() {
+    serverLogStream = fs.createWriteStream('server.log', { flags: 'a' });
+    
+    serverProcess = spawn('npx', ['vertstack', ...${JSON.stringify(args)}], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true
+    });
+
+    serverProcess.stdout.pipe(serverLogStream);
+    serverProcess.stderr.pipe(serverLogStream);
+
+    serverProcess.stdout.on('data', (data) => {
+        console.log(\`Server: \${data}\`);
+    });
+
+    serverProcess.stderr.on('data', (data) => {
+        console.error(\`Server Error: \${data}\`);
+    });
+}
+
+function stopServerAndQuit() {
+    if (serverProcess) {
+        console.log('Stopping server process...');
+        return new Promise((resolve) => {
+            treeKill(serverProcess.pid, 'SIGKILL', (err) => {
+                if (err) {
+                    console.error('Failed to kill server process:', err);
+                } else {
+                    console.log('Server process terminated');
+                }
+                serverProcess = null;
+                if (serverLogStream) {
+                    console.log('Closing log stream...');
+                    serverLogStream.end();
+                    serverLogStream = null;
+                }
+                resolve();
+            });
+        }).then(() => {
+            console.log('Quitting application...');
+            app.quit();
+        });
+    } else {
+        if (serverLogStream) {
+            console.log('Closing log stream...');
+            serverLogStream.end();
+            serverLogStream = null;
+        }
+        console.log('Quitting application...');
+        app.quit();
+    }
+}
+
+app.on('ready', () => {
+    startServer();
+    setTimeout(createWindow, 1000); // Give the server a second to start
+});
+
+app.on('window-all-closed', stopServerAndQuit);
+
+app.on('will-quit', (event) => {
+    if (serverProcess || serverLogStream) {
+        event.preventDefault();
+        stopServerAndQuit().then(() => {
+            app.exit(0);
+        });
+    }
+});
+
+// Ensure the server is stopped if the app crashes or is killed
+process.on('exit', stopServerAndQuit);
+process.on('SIGINT', stopServerAndQuit);
+process.on('SIGTERM', stopServerAndQuit);
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    stopServerAndQuit();
+});
+`;
+
+    await fs.writeFile('electron-main.js', mainContent);
+    console.log('Created electron-main.js with robust process termination');
+}
+
+function startElectronApp() {
+    console.log('Starting Electron app...');
+    try {
+        execSync('npx electron .', { stdio: 'inherit' });
+    } catch (error) {
+        console.error('Failed to start Electron app:', error);
+    }
+}
+
+async function updatePackageJson() {
+    let packageJson;
+    try {
+        packageJson = JSON.parse(await fs.readFile('package.json', 'utf-8'));
+    } catch (error) {
+        packageJson = {};
+    }
+
+    packageJson.main = 'electron-main.js';
+    packageJson.scripts = packageJson.scripts || {};
+    packageJson.scripts['start-electron'] = 'electron .';
+
+    await fs.writeFile('package.json', JSON.stringify(packageJson, null, 2));
+    console.log('Updated package.json with Electron start script');
+}
+
 async function main() {
     if (shouldGenerateReadme()) {
         await generateReadme(args);
@@ -398,6 +561,11 @@ async function main() {
         await copyVertStackFile();
         await createOrUpdateScripts();
         console.log('Installation completed. Use serve.cmd/sh to start the server.');
+    } else if (shouldUseElectron()) {
+        await updatePackageJson();
+        await installElectronDependencies();
+        await createElectronMain();
+        startElectronApp();
     } else {
         await updateEnvFileHashes();
         await startServer();
