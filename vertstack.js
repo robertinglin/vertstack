@@ -2156,15 +2156,15 @@ function handleSandboxedMode() {
       if (typeof func === 'function' && key !== 'default') {
         if (key.startsWith('_')) {
           key = key.slice(1);
-          bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
+          bus(key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
         } else if (key.startsWith('$')) {
-          bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
+          bus(key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
         } else {
-          bus("*." + key, (payload) => func(payload.data, bus, sessionId, pageId));
+          bus("*." + key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
           if (!key.startsWith(projectKey + ".")) {
             key = projectKey + '.' + key;
           }
-          bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
+          bus(key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
         }
       }
     }
