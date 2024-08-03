@@ -1447,12 +1447,7 @@ function injectClientBusCode(
               window.bus(key, (payload) => func(payload.data));
             } else {
               bus("*." + key, (payload) => func(payload.data));
-              if (!key.startsWith(projectKey + ".")) {
-                key = projectKey + '.' + key;
-              }
-              window.bus(key, (payload) => func(payload.data));
             }
-
           }
         }
       }).catch(error => console.error('Error loading client module:', error));
@@ -2161,10 +2156,6 @@ function handleSandboxedMode() {
           bus(key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
         } else {
           bus("*." + key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
-          if (!key.startsWith(projectKey + ".")) {
-            key = projectKey + '.' + key;
-          }
-          bus(key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
         }
       }
     }
