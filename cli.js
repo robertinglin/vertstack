@@ -193,7 +193,7 @@ async function startServer() {
         childProcess.kill();
     }
 
-    childProcess = spawn('npx', ['nodemon', '--watch', '.', '--ext', 'js,mjs', '--', ...nodeArgs], {
+    childProcess = spawn('npx', ['nodemon', '--watch', '.', '--ext', 'js,mjs,html,css', '--', ...nodeArgs], {
         stdio: 'pipe',
         shell: true
     });
@@ -293,7 +293,7 @@ for %%F in (.env*) do (
     )
 )
 
-npx nodemon --watch . --ext js,mjs --exec "node %ENV_FILES% vertstack.js ${args.join(' ')}"`
+npx nodemon --watch . --ext js,mjs,html,css --exec "node %ENV_FILES% vertstack.js ${args.join(' ')}"`
         : `#!/bin/sh
 ENV_FILES=""
 for file in .env*; do
@@ -302,7 +302,7 @@ for file in .env*; do
     fi
 done
 
-npx nodemon --watch . --ext js,mjs --exec "node $ENV_FILES vertstack.js ${args.join(' ')}"`;
+npx nodemon --watch . --ext js,mjs,html,css --exec "node $ENV_FILES vertstack.js ${args.join(' ')}"`;
 
     // serveDownContent remains unchanged
     const serveDownContent = isWindows
