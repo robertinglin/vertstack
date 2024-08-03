@@ -920,7 +920,6 @@ function serveMainPage(res) {
         if (projectKeys.has(moduleName)) {
           return `
           <iframe
-            id="iframe-${moduleName}"
             src="/${moduleName}?t=${currentTime}"
             style="border: none; background-color: transparent; width: 100%"
             allowTransparency="true"
@@ -938,7 +937,6 @@ function serveMainPage(res) {
       .map(
         ([key], index) => `
     <iframe
-      id="iframe-${key}"
       src="/${key}?t=${currentTime}"
       style="border: none; background-color: transparent; width: 100%;"
       allowTransparency="true"
@@ -968,23 +966,32 @@ function serveMainPage(res) {
   }
 
   const headScript = `
-      <script>
-      (function () {
-        window.addEventListener(
-          "message",
-          function (event) {
-            const iframe = document.getElementById(
-              "iframe-" + event.data.projectKey
-            );
-            if (iframe && typeof event.data.height === "number") {
-              iframe.style.height = event.data.height + "px";
+  <script>
+  (function () {
+    window.addEventListener(
+      "message",
+      function (event) {
+        if (typeof event.data.projectKey === "string" && typeof event.data.height === "number") {
+          const iframes = document.getElementsByTagName("iframe");
+          const projectKey = "/" + event.data.projectKey;
+          
+          for (let i = 0; i < iframes.length; i++) {
+            const src = iframes[i].getAttribute("src");
+            if (src && src.startsWith(projectKey)) {
+              const nextChar = src.charAt(projectKey.length);
+              if (nextChar === "" || nextChar === "/" || nextChar === "?" || nextChar === "#") {
+                iframes[i].style.height = event.data.height + "px";
+                break;
+              }
             }
-          },
-          false
-        );
-      })();
-        </script>
-      `;
+          }
+        }
+      },
+      false
+    );
+  })();
+  </script>
+  `;
   const bodyScript = `
     <script>
       ${mainClientCode}
