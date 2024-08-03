@@ -1446,11 +1446,11 @@ function injectClientBusCode(
             } else if (key.startsWith("$")) {
               window.bus(key, (payload) => func(payload.data));
             } else {
-              window.bus(key, (payload) => func(payload.data));
+              bus("*." + key, (payload) => func(payload.data));
               if (!key.startsWith(projectKey + ".")) {
                 key = projectKey + '.' + key;
               }
-              bus("*." + key, (payload) => func(payload.data));
+              window.bus(key, (payload) => func(payload.data));
             }
 
           }
@@ -2160,11 +2160,11 @@ function handleSandboxedMode() {
         } else if (key.startsWith('$')) {
           bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
         } else {
-          bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
+          bus("*." + key, (payload) => func(payload.data, bus, sessionId, pageId));
           if (!key.startsWith(projectKey + ".")) {
             key = projectKey + '.' + key;
           }
-          bus("*." + key, (payload) => func(payload.data, bus, sessionId, pageId));
+          bus(key, (payload) => func(payload.data, bus, sessionId, pageId));
         }
       }
     }
