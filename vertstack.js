@@ -964,21 +964,36 @@ function serveMainPage(res) {
     </html>
     `;
   }
-
   const headScript = `
   <script>
   (function () {
+    function getIframeUrl(iframe) {
+      try {
+        let subdir = iframe.contentWindow.location.href;
+        if (subdir) {
+          subdir = subdir.split('/').slice(3).join('/');
+        } 
+        return subdir;
+      } catch (e) {
+        let subdir = iframe.src;
+        if (subdir.startsWith('/')) {
+          subdir = subdir.slice(1);
+        }
+        return subdir; 
+      }
+    }
+  
     window.addEventListener(
       "message",
       function (event) {
         if (typeof event.data.projectKey === "string" && typeof event.data.height === "number") {
           const iframes = document.getElementsByTagName("iframe");
-          const projectKey = "/" + event.data.projectKey;
+          const projectKey = event.data.projectKey;
           
           for (let i = 0; i < iframes.length; i++) {
-            const src = iframes[i].getAttribute("src");
-            if (src && src.startsWith(projectKey)) {
-              const nextChar = src.charAt(projectKey.length);
+            const url = getIframeUrl(iframes[i]);
+            if (url && url.startsWith(projectKey)) {
+              const nextChar = url.charAt(projectKey.length);
               if (nextChar === "" || nextChar === "/" || nextChar === "?" || nextChar === "#") {
                 iframes[i].style.height = event.data.height + "px";
                 break;
