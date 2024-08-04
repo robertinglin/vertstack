@@ -69,6 +69,51 @@ function parseKey(key, projectKey) {
 }
 // </parsekey>
 
+// <watchresize>
+function watchResizeScript () {
+  function getIframeUrl(iframe) {
+    try {
+      let subdir = iframe.contentWindow.location.href;
+      if (subdir) {
+        subdir = subdir.split('/').slice(3).join('/');
+      } 
+      return subdir;
+    } catch (e) {
+      let subdir = iframe.src;
+      if (subdir.startsWith('/')) {
+        subdir = subdir.slice(1);
+      }
+      return subdir; 
+    }
+  }
+
+  window.addEventListener(
+    "message",
+    function (event) {
+      if (typeof event.data.projectKey === "string" && typeof event.data.height === "number") {
+        const iframes = document.getElementsByTagName("iframe");
+        const projectKey = event.data.projectKey;
+        
+        for (let i = 0; i < iframes.length; i++) {
+          const url = getIframeUrl(iframes[i]);
+          if (url && url.startsWith(projectKey)) {
+            const nextChar = url.charAt(projectKey.length);
+            if (nextChar === "" || nextChar === "/" || nextChar === "?" || nextChar === "#") {
+              iframes[i].style.height = event.data.height + "px";
+              break;
+            }
+          }
+        }
+        if (typeof sendHeight !== "undefined") {
+          sendHeight();
+        }
+      }
+    },
+    false
+  );
+}
+// </watchresize>
+
 // <colors>
 const colors = [
   '\x1b[32m', '\x1b[33m', '\x1b[34m', '\x1b[35m', '\x1b[36m', '\x1b[37m',
@@ -902,37 +947,34 @@ function serveMainPage(res) {
   let htmlContent;
   let usingCustomIndex = false;
   try {
-    // Try to read the index.html file from the root directory
     htmlContent = fs.readFileSync("index.html", "utf8");
     usingCustomIndex = true;
   } catch (error) {
-    // If index.html doesn't exist, we'll use the default template
     usingCustomIndex = false;
   }
 
   const currentTime = Date.now();
 
   if (usingCustomIndex) {
-    // Replace module comments with iframes in custom index.html
     htmlContent = htmlContent.replace(
-      /<!-- @(\w+) -->/g,
-      (match, moduleName) => {
+      /<!-- @(\w+)(?:\s+height="(\d+)")?\s*-->/g,
+      (match, moduleName, height) => {
         if (projectKeys.has(moduleName)) {
+          const heightAttr = height ? ` height="${height}"` : '';
           return `
           <iframe
             src="/${moduleName}?t=${currentTime}"
             style="border: none; background-color: transparent; width: 100%"
             allowTransparency="true"
             frameBorder="0"
-            scrolling="no">
+            scrolling="no"${heightAttr}>
           </iframe>
         `;
         }
-        return match; // Keep the comment if the module doesn't exist
+        return match;
       }
     );
   } else {
-    // Generate the default layout with all modules
     const projectIframes = Array.from(projectKeys.entries())
       .map(
         ([key], index) => `
@@ -966,45 +1008,7 @@ function serveMainPage(res) {
   }
   const headScript = `
   <script>
-  (function () {
-    function getIframeUrl(iframe) {
-      try {
-        let subdir = iframe.contentWindow.location.href;
-        if (subdir) {
-          subdir = subdir.split('/').slice(3).join('/');
-        } 
-        return subdir;
-      } catch (e) {
-        let subdir = iframe.src;
-        if (subdir.startsWith('/')) {
-          subdir = subdir.slice(1);
-        }
-        return subdir; 
-      }
-    }
-  
-    window.addEventListener(
-      "message",
-      function (event) {
-        if (typeof event.data.projectKey === "string" && typeof event.data.height === "number") {
-          const iframes = document.getElementsByTagName("iframe");
-          const projectKey = event.data.projectKey;
-          
-          for (let i = 0; i < iframes.length; i++) {
-            const url = getIframeUrl(iframes[i]);
-            if (url && url.startsWith(projectKey)) {
-              const nextChar = url.charAt(projectKey.length);
-              if (nextChar === "" || nextChar === "/" || nextChar === "?" || nextChar === "#") {
-                iframes[i].style.height = event.data.height + "px";
-                break;
-              }
-            }
-          }
-        }
-      },
-      false
-    );
-  })();
+  (${extractCode("watchresize")})()
   </script>
   `;
   const bodyScript = `
@@ -1357,7 +1361,7 @@ async function serveHtmlFile(
               urlAttributes.forEach(attr => {
                 if (element.hasAttribute(attr)) {
                   const originalUrl = element.getAttribute(attr);
-                  if (shouldRewriteUrl(originalUrl)) {
+                  if (shouldRewriteUrl(originalUrl) && element.tagName !== 'IFRAME') {
                     element.setAttribute(attr, rewriteUrl(originalUrl));
                   }
                 }
@@ -1499,7 +1503,6 @@ function injectClientBusCode(
 function injectResizeScript(htmlContent, projectKey) {
   const resizeScript = `
     <script>
-
     function getIFrameHeight(){
     function getComputedBodyStyle(prop) {
         function getPixelValue(value) {
@@ -1538,10 +1541,34 @@ function injectResizeScript(htmlContent, projectKey) {
     return document.body.getBoundingClientRect().bottom +
         getComputedBodyStyle('marginBottom');
     }
-
+      let shortTimeout;
+      let mediumTimeout;
+      let longTimeout;
       function sendHeight() {
-        window.parent.postMessage({ projectKey: '${projectKey}', height: getIFrameHeight() }, '*');
+      const iframeHeight = getIFrameHeight();
+        window.parent.postMessage({ projectKey: '${projectKey}', height: iframeHeight }, '*');
+        clearTimeout(shortTimeout);
+        shortTimeout =setTimeout(() => {
+          if (iframeHeight !== getIFrameHeight()) {
+            sendHeight();
+          }
+        }, 10); 
+        
+        clearTimeout(mediumTimeout);
+        mediumTimeout = setTimeout(() => {
+          if (iframeHeight !== getIFrameHeight()) {
+            sendHeight();
+          }
+          }, 50);
+        
+        clearTimeout(longTimeout);
+        longTimeout = setTimeout(() => {
+          if (iframeHeight !== getIFrameHeight()) {
+            sendHeight();
+          }
+          }, 100);  
       }
+      
       
       window.addEventListener('load', sendHeight);
       window.addEventListener('resize', sendHeight);
@@ -1552,6 +1579,7 @@ function injectResizeScript(htmlContent, projectKey) {
         childList: true, 
         subtree: true 
       });
+    (${extractCode("watchresize")})();
     </script>
   `;
 
@@ -1801,6 +1829,15 @@ function client(projectKey) {
   window.addEventListener('message', function (event) {
     if (event.data.type === 'setPageId' && !pageId) {
       initClient(event.data.pageId);
+    }
+  }, false);
+
+  window.addEventListener('message', function (event) {
+    if (event.data.type === 'getPageId') {
+      // Ensure the message is from a child iframe
+      if (event.source && event.source !== window) {
+        event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
+      }
     }
   }, false);
 
