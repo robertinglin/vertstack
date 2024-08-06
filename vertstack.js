@@ -76,14 +76,14 @@ function watchResizeScript () {
       let subdir = iframe.contentWindow.location.href;
       if (subdir) {
         subdir = subdir.split('/').slice(3).join('/');
-      } 
+      }
       return subdir;
     } catch (e) {
       let subdir = iframe.src;
       if (subdir.startsWith('/')) {
         subdir = subdir.slice(1);
       }
-      return subdir; 
+      return subdir;
     }
   }
 
@@ -93,7 +93,7 @@ function watchResizeScript () {
       if (typeof event.data.projectKey === "string" && typeof event.data.height === "number") {
         const iframes = document.getElementsByTagName("iframe");
         const projectKey = event.data.projectKey;
-        
+
         for (let i = 0; i < iframes.length; i++) {
           const url = getIframeUrl(iframes[i]);
           if (url && url.startsWith(projectKey)) {
@@ -478,7 +478,7 @@ function InterBus(sendExternalMessage) {
             ...response,
             local: true,
           }
-        }); 
+        });
       }).flat();
       const externalResponses = Object.entries(externalResponse).map(([pageId, responses]) => {
         return responses.map((response) => {
@@ -956,24 +956,7 @@ function serveMainPage(res) {
   const currentTime = Date.now();
 
   if (usingCustomIndex) {
-    htmlContent = htmlContent.replace(
-      /<!-- @(\w+)(?:\s+height="(\d+)")?\s*-->/g,
-      (match, moduleName, height) => {
-        if (projectKeys.has(moduleName)) {
-          const heightAttr = height ? ` height="${height}"` : '';
-          return `
-          <iframe
-            src="/${moduleName}?t=${currentTime}"
-            style="border: none; background-color: transparent; width: 100%"
-            allowTransparency="true"
-            frameBorder="0"
-            scrolling="no"${heightAttr}>
-          </iframe>
-        `;
-        }
-        return match;
-      }
-    );
+    htmlContent = processHtml(htmlContent);
   } else {
     const projectIframes = Array.from(projectKeys.entries())
       .map(
@@ -1052,28 +1035,35 @@ async function serveProjectPage(req, res, projectKey) {
     );
 
     const clientCode = getIFrameCode(projectKey);
-    const clientJsPath = path.join(projectPath, "client.js");
-    const clientMjsPath = path.join(projectPath, "client.mjs");
-    let clientJsContent = "";
-    try {
-      clientJsContent = fs.readFileSync(clientJsPath, "utf8");
-    } catch (error) {
-      try {
-        clientJsContent = fs.readFileSync(clientMjsPath, "utf8");
-      } catch (error) {
-        // If client.js doesn't exist, we just leave clientJsContent as an empty string
-        console.log(`No client found for project ${projectKey}`);
-      }
+    let clientJsPath = '';
+    const jsPath = path.join(projectPath, "client.js");
+    const mjsPath = path.join(projectPath, "client.mjs");
+
+    if (fs.existsSync(jsPath)) {
+      clientJsPath = `/${projectKey}/client.js`;
+    } else if (fs.existsSync(mjsPath)) {
+      clientJsPath = `/${projectKey}/client.mjs`;
+    } else {
+      console.log(`No client found for project ${projectKey}`);
     }
 
-    if (publicDir) {
+
+    if (req.url.split('/').pop().includes('.')) {
+      const filePath = path.join(projectPath, req.url.split('/').pop());
+      if (fs.existsSync(filePath)) {
+        const fileStream = fs.createReadStream(filePath);
+        res.writeHead('200', { 'Content-Type': getContentType(filePath) });
+        fileStream.pipe(res);
+        return;
+      }
+    } else if (publicDir) {
       await serveFromPublicDirectory(
         req,
         res,
         publicDir,
         projectKey,
         clientCode,
-        clientJsContent
+        clientJsPath
       );
     } else if (indexHtmlPath) {
       await serveHtmlFile(
@@ -1081,7 +1071,7 @@ async function serveProjectPage(req, res, projectKey) {
         indexHtmlPath,
         projectKey,
         clientCode,
-        clientJsContent,
+        clientJsPath,
         true
       );
     } else {
@@ -1090,7 +1080,7 @@ async function serveProjectPage(req, res, projectKey) {
         projectKey,
         projectPath,
         clientCode,
-        clientJsContent
+        clientJsPath
       );
     }
   } catch (error) {
@@ -1199,12 +1189,60 @@ function proxyRequest(req, res, targetPort) {
   });
 }
 
+function processHtml(htmlContent, projectKey = null) {
+  const currentTime = Date.now();
+
+  function rewriteUrls(content) {
+    if (projectKey) {
+      return content.replace(
+        /(<[^>]+\s)(src|href)=(["'])\/(?!\/)/gi,
+        `$1$2=$3/${projectKey}/`
+      );
+    }
+    return content;
+  }
+
+  // Split the HTML content into parts: outside iframes and inside iframes
+  const parts = htmlContent.split(/(<iframe[\s\S]*?<\/iframe>)/gi);
+  const processedParts = parts.map((part, index) => {
+    // If it's an odd index, it's iframe content, so we don't modify it
+    if (index % 2 !== 0) {
+      return part;
+    }
+    // For non-iframe content, apply the URL rewriting and iframe generation
+    let processedPart = rewriteUrls(part);
+
+    processedPart = processedPart.replace(
+      /<!-- @(\w+)(?:\s+height="(\d+)")?\s*-->/g,
+      (match, moduleName, height) => {
+        if (projectKeys.has(moduleName)) {
+          const heightAttr = height ? ` height="${height}"` : '';
+          return `
+          <iframe
+            src="/${moduleName}?t=${currentTime}"
+            style="border: none; background-color: transparent; width: 100%"
+            allowTransparency="true"
+            frameBorder="0"
+            scrolling="no"${heightAttr}>
+          </iframe>
+          `;
+        }
+        return match;
+      }
+    );
+
+    return processedPart;
+  });
+
+  return processedParts.join('');
+}
+
 function serveDefaultProjectPage(
   res,
   projectKey,
   projectPath,
   clientCode,
-  clientJsContent
+  clientJsPath
 ) {
   res.writeHead(200, { "Content-Type": "text/html" });
   let htmlContent = `
@@ -1221,7 +1259,7 @@ function serveDefaultProjectPage(
   htmlContent = injectClientBusCode(
     htmlContent,
     clientCode,
-    clientJsContent,
+    clientJsPath,
     projectKey
   );
   htmlContent = injectResizeScript(htmlContent, projectKey);
@@ -1284,7 +1322,7 @@ async function serveFromPublicDirectory(
   publicDir,
   projectKey,
   clientCode,
-  clientJsContent
+  clientJsPath
 ) {
   const relativePath = req.url.split("?")[0].slice(projectKey.length + 2); // +2 to account for the leading slash and potential trailing slash
   const filePath = path.join(publicDir, relativePath);
@@ -1303,7 +1341,7 @@ async function serveFromPublicDirectory(
           indexPath,
           projectKey,
           clientCode,
-          clientJsContent
+          clientJsPath
         );
       } else {
         serveNotFound(res);
@@ -1329,17 +1367,13 @@ async function serveHtmlFile(
   filePath,
   projectKey,
   clientCode,
-  clientJsContent = "",
+  clientJsPath = "",
   forceClientCodeInjection = false
 ) {
   try {
     let htmlContent = fs.readFileSync(filePath, "utf8");
 
-    // Static URL rewriting
-    htmlContent = htmlContent.replace(
-      /(src|href)=(["'])\/(?!\/)/g,
-      `$1=$2/${projectKey}/`
-    );
+    htmlContent = processHtml(htmlContent, projectKey);
 
     // Dynamic URL rewriting script
     const urlRewriteScript = `
@@ -1425,7 +1459,7 @@ async function serveHtmlFile(
     htmlContent = injectClientBusCode(
       htmlContent,
       clientCode,
-      clientJsContent,
+      clientJsPath,
       projectKey,
       forceClientCodeInjection
     );
@@ -1442,7 +1476,7 @@ async function serveHtmlFile(
 function injectClientBusCode(
   htmlContent,
   clientCode,
-  clientJsContent,
+  clientJsPath,
   projectKey,
   forceClientCodeInjection = false
 ) {
@@ -1454,49 +1488,42 @@ function injectClientBusCode(
     </script>
   `;
 
-  const isModule = clientJsContent.includes("export ") || clientJsContent.includes("import ") || clientJsContent.includes("module.exports");
+  const clientScript = clientJsPath ? `
+    <script type="module" src="${clientJsPath}"></script>
+  ` : '';
 
-  const clientBlob = isModule ? `
+  const exportHandlerScript = clientJsPath ? `
     <script type="module">
-      const clientCode = new Blob([\`${clientJsContent.replace(/\`/g, "\\\`").replaceAll("$", "\\$")}\`], { type: 'text/javascript' });
-      const clientUrl = URL.createObjectURL(clientCode);
+      import * as clientExports from '${clientJsPath}';
       
-      // Dynamically import the client module
-      import(clientUrl).then(module => {
-        // Register exported functions
-        for (let [key, func] of Object.entries(module)) {
-          if (typeof func === 'function' && key !== 'default') {
-            if (key.startsWith('_')) {
-              key = key.slice(1);
-              window.bus(key, (payload) => func(payload.data));
-            } else if (key.startsWith("$")) {
-              window.bus(key, (payload) => func(payload.data));
-            } else {
-              bus("*." + key, (payload) => func(payload.data));
-            }
+      // Register exported functions
+      for (let [key, func] of Object.entries(clientExports)) {
+        if (typeof func === 'function' && key !== 'default') {
+          if (key.startsWith('_')) {
+            key = key.slice(1);
+            window.bus(key, (payload) => func(payload.data));
+          } else if (key.startsWith("$")) {
+            window.bus(key, (payload) => func(payload.data));
+          } else {
+            window.bus("*." + key, (payload) => func(payload.data));
           }
         }
-      }).catch(error => console.error('Error loading client module:', error));
+      }
     </script>
-  ` : `
-    <script>
-      ${clientJsContent}
-    </script>
-  `;
+  ` : '';
 
   if (htmlContent.includes("</head>")) {
-    htmlContent = htmlContent.replace("</head>", `${busCode}${clientBlob}</head>`);
+    htmlContent = htmlContent.replace("</head>", `${busCode}${clientScript}${exportHandlerScript}</head>`);
   } else if (htmlContent.includes("<body>")) {
-    htmlContent = htmlContent.replace("<body>", `${busCode}${clientBlob}<body>`);
+    htmlContent = htmlContent.replace("<body>", `${busCode}${clientScript}${exportHandlerScript}<body>`);
   } else if (htmlContent.includes("<html>")) {
     htmlContent = htmlContent.replace(
       "<html>",
-      `<html><head>${busCode}${clientBlob}</head>`
+      `<html><head>${busCode}${clientScript}${exportHandlerScript}</head>`
     );
   } else {
-    htmlContent = `<head>${busCode}${clientBlob}</head>${htmlContent}`;
+    htmlContent = `<head>${busCode}${clientScript}${exportHandlerScript}</head>${htmlContent}`;
   }
-
   return htmlContent;
 }
 
@@ -1595,6 +1622,7 @@ function getContentType(filePath) {
   const mimeTypes = {
     ".html": "text/html",
     ".js": "text/javascript",
+    ".mjs": "text/javascript",
     ".css": "text/css",
     ".json": "application/json",
     ".png": "image/png",
@@ -1824,6 +1852,106 @@ function client(projectKey) {
       message.pageId = pageId;
       broadcastChannel.postMessage(message);
     });
+
+    setupMouseEventSharing();
+  }
+
+  function setupMouseEventSharing() {
+    const mouseEvents = ['mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'wheel'];
+
+    function getIframeOffset() {
+      let win = window;
+      let totalOffsetX = 0;
+      let totalOffsetY = 0;
+
+      while (win !== window.top) {
+        const rect = win.frameElement.getBoundingClientRect();
+        totalOffsetX += rect.left;
+        totalOffsetY += rect.top;
+        win = win.parent;
+      }
+
+      return { x: totalOffsetX, y: totalOffsetY };
+    }
+
+    function sendEventToParent(event) {
+      if (event.isSynthetic) {
+        return;
+      }
+
+      const eventProps = [
+        'clientX', 'clientY', 'pageX', 'pageY', 'screenX', 'screenY',
+        'offsetX', 'offsetY', 'movementX', 'movementY',
+        'button', 'buttons', 'ctrlKey', 'shiftKey', 'altKey', 'metaKey'
+      ];
+
+      const iframeOffset = getIframeOffset();
+      const eventData = {
+        type: event.type,
+        iframeOffset: iframeOffset,
+        projectKey
+      };
+
+      eventProps.forEach(prop => {
+        if (event[prop] !== undefined) {
+          if (prop.endsWith('X')) {
+            eventData[prop] = event[prop] + iframeOffset.x;
+          } else if (prop.endsWith('Y')) {
+            eventData[prop] = event[prop] + iframeOffset.y;
+          } else {
+            eventData[prop] = event[prop];
+          }
+        }
+      });
+
+      window.top.postMessage({
+        type: 'childMouseEvent',
+        event: eventData
+      }, '*');
+    }
+
+    function propagateEventToChildren(eventData) {
+      const iframes = Array.from(document.getElementsByTagName('iframe'));
+      iframes.forEach(iframe => {
+        const iframeRect = iframe.getBoundingClientRect();
+        const iframeEvent = {
+          ...eventData,
+          clientX: eventData.clientX - iframeRect.left,
+          clientY: eventData.clientY - iframeRect.top,
+          pageX: eventData.pageX - iframeRect.left + iframe.contentWindow.pageXOffset,
+          pageY: eventData.pageY - iframeRect.top + iframe.contentWindow.pageYOffset
+        };
+        iframe.contentWindow.postMessage({
+          type: 'mouseEvent',
+          event: iframeEvent
+        }, '*');
+      });
+    }
+
+    mouseEvents.forEach(eventType => {
+      window.addEventListener(eventType, sendEventToParent, false);
+    });
+
+    window.addEventListener('message', event => {
+      if (event.data.type === 'mouseEvent') {
+        const eventData = event.data.event;
+
+        const recreatedEvent = new MouseEvent(eventData.type, {
+          ...eventData,
+          bubbles: true,
+          cancelable: true
+        });
+
+        recreatedEvent.isSynthetic = true;
+
+        if (eventData.projectKey !== projectKey) {
+          document.dispatchEvent(recreatedEvent);
+        }
+
+        // Propagate the event to nested iframes
+        propagateEventToChildren(eventData);
+      }
+    }, true);
   }
 
   window.addEventListener('message', function (event) {
@@ -1834,7 +1962,6 @@ function client(projectKey) {
 
   window.addEventListener('message', function (event) {
     if (event.data.type === 'getPageId') {
-      // Ensure the message is from a child iframe
       if (event.source && event.source !== window) {
         event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
       }
@@ -1998,27 +2125,17 @@ function mainClient(projectKeys) {
   let channels = [];
 
   const pageId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-  window.addEventListener('message', function (event) {
-    if (event.data.type === 'getPageId') {
-      // Ensure the message is from a child iframe
-      if (event.source && event.source !== window) {
-        event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
-      }
-    }
-  }, false);
 
   function setupWorker() {
     worker = new SharedWorker('websocket-worker.js');
     worker.port.onmessage = handleWorkerMessage;
     worker.port.start();
 
-    // Setup channels for all project keys
     projectKeys.forEach(key => {
       sendOrQueueMessage({ type: 'setupChannel', data: key });
       setupSingleProjectChannel(key);
     });
 
-    // Signal that we're ready to receive the 'ready' message
     worker.port.postMessage({ type: 'ready' });
   }
 
@@ -2052,9 +2169,6 @@ function mainClient(projectKeys) {
       case 'error':
         console.error("WebSocket error:", data);
         break;
-      case 'message':
-        // Handle incoming messages if needed
-        break;
     }
   }
 
@@ -2077,12 +2191,99 @@ function mainClient(projectKeys) {
     channels = [];
   }
 
+  function setupMouseEventSharing() {
+    const iframes = new Set();
+
+    function findAllIframes(win = window) {
+      const frames = Array.from(win.document.getElementsByTagName('iframe'));
+      frames.forEach(frame => {
+        iframes.add(frame.contentWindow);
+        findAllIframes(frame.contentWindow);
+      });
+    }
+
+    function initIframeTracking() {
+      findAllIframes();
+      const observer = new MutationObserver(mutations => {
+        mutations.forEach(mutation => {
+          mutation.addedNodes.forEach(node => {
+            if (node.tagName === 'IFRAME') {
+              iframes.add(node.contentWindow);
+              findAllIframes(node.contentWindow);
+            }
+          });
+        });
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function getDocumentOffset() {
+      const bodyStyle = window.getComputedStyle(document.body);
+      return {
+        x: parseInt(bodyStyle.marginLeft, 10),
+        y: parseInt(bodyStyle.marginTop, 10)
+      };
+    }
+    function propagateEvent(originalEvent) {
+      const docOffset = getDocumentOffset();
+      iframes.forEach((frameWindow) => {
+        const frameElement = frameWindow.frameElement;
+        if (frameElement) {
+          const rect = frameElement.getBoundingClientRect();
+          const adjustedEvent = {
+            ...originalEvent,
+            clientX: originalEvent.clientX - rect.left - docOffset.x,
+            clientY: originalEvent.clientY - rect.top - docOffset.y,
+            pageX: originalEvent.pageX - rect.left - docOffset.x,
+            pageY: originalEvent.pageY - rect.top - docOffset.y
+          };
+          frameWindow.postMessage({
+            type: 'mouseEvent',
+            event: adjustedEvent
+          }, '*');
+        }
+      });
+    }
+
+    window.addEventListener('message', event => {
+      if (event.data.type === 'childMouseEvent') {
+        propagateEvent(event.data.event);
+      }
+    }, true);
+
+    const mouseEvents = ['mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'wheel'];
+    mouseEvents.forEach(eventType => {
+      window.addEventListener(eventType, (event) => {
+        const docOffset = getDocumentOffset();
+        const adjustedEvent = {
+          type: event.type,
+          clientX: event.clientX + docOffset.x,
+          clientY: event.clientY + docOffset.y,
+          pageX: event.pageX + docOffset.x,
+          pageY: event.pageY + docOffset.y,
+        };
+        propagateEvent(adjustedEvent);
+      }, true);
+    });
+
+    initIframeTracking();
+    window.rescanIframes = initIframeTracking;
+  }
+
+  window.addEventListener('message', function (event) {
+    if (event.data.type === 'getPageId') {
+      if (event.source && event.source !== window) {
+        event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
+      }
+    }
+  }, false);
+
   window.addEventListener('beforeunload', () => {
     unloading = true;
   });
 
-  // Initialize the worker
   setupWorker();
+  setupMouseEventSharing();
 }
 // </mainclient>
 
