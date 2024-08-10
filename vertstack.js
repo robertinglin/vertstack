@@ -1101,8 +1101,23 @@ async function serveProjectPage(req, res, projectKey) {
     serveNotFound(res);
   }
 }
+
+function parseCookies(cookieHeader) {
+  const cookies = {};
+  if (cookieHeader) {
+    cookieHeader.split(';').forEach(cookie => {
+      const parts = cookie.split('=');
+      const name = parts[0].trim();
+      const value = parts[1].trim();
+      cookies[name] = value;
+    });
+  }
+  return cookies;
+}
+
 async function serveApiRequest(req, res, projectKey, proxyPorts) {
-  const session = sessions.get(req.headers.cookie?.split("=")[1]);
+  const cookies = parseCookies(req.headers.cookie);
+  const session = cookies.sessionId;
   if (!session) {
     res.writeHead(401);
     res.end("Unauthorized");
@@ -1832,6 +1847,15 @@ function registerModule(child, project) {
   serverModules.set(project, child);
 }
 
+process.on('SIGINT', () => {
+  console.log('Caught interrupt signal');
+  serverModules.forEach((child, project) => {
+    console.log(`Terminating child process for ${project}`);
+    child.kill('SIGTERM');
+  });
+  process.exit();
+});
+
 // </module>
 
 // <client>
@@ -2014,7 +2038,7 @@ function webWorker() {
   let queue = [];
 
   function connectWebSocket() {
-    ws = new WebSocket(`ws://${self.location.host}`);
+    ws = new WebSocket(`${self.location.protocol === 'https:' ? 'wss://' : 'ws://'}${self.location.host}`);
     ws.onopen = () => {
       if (queue.length > 0) {
         queue.forEach(message => ws.send(JSON.stringify(message)));
