@@ -15,6 +15,17 @@ function extractCode(tag) {
   return match ? match[1].trim() : "";
 }
 
+let vertstackTimeout = 1000;
+if (process.argv.includes("--timeout=")) {
+  vertstackTimeout = parseInt(process.argv.find((arg) => arg.startsWith("--timeout=")).split("=")[1]);
+}
+
+// <getVertstackTimeout>
+function getVertstackTimeout() {
+  return vertstackTimeout;
+}
+// </getVertstackTimeout>
+
 // <parsekey>
 function extractProjectKey(key) {
   if (key.startsWith("_") || key.startsWith("$") || key.startsWith("#")) {
@@ -179,7 +190,7 @@ function createBus(projectKey, handleRemoteDispatch) {
           console.error("Request timed out: " + requestId + " for key: " + key, data, target);
         }
         resolve([]);
-      }, 1000);
+      }, getVertstackTimeout());
     }).then((response) => {
       if (closed) {
         return;
@@ -383,7 +394,7 @@ function InterBus(sendExternalMessage) {
           const timeout = new Promise((resolve) => {
             setTimeout(() => {
               resolve([]);
-            }, 1000);
+            }, getVertstackTimeout());
           });
           const response = await Promise.race([
             Promise.all(channelResponses),
@@ -459,7 +470,7 @@ function InterBus(sendExternalMessage) {
         const timeout = new Promise((resolve) => {
           setTimeout(() => {
             resolve([]);
-          }, 1000);
+          }, getVertstackTimeout());
         });
         const response = await Promise.race([
           Promise.all(channelResponses),
@@ -881,9 +892,12 @@ function getMainClientCode(modules) {
   const parseKey = extractCode("parsekey");
   const interBus = extractCode("interbus");
   const mainClientCode = extractCode("mainclient");
+  const getVertstackTimeoutCode = extractCode("getVertstackTimeout");
 
   return `
     ${parseKey}
+    const vertstackTimeout = ${getVertstackTimeout()};
+    ${getVertstackTimeoutCode}
     ${interBus}
     const projectKeys = ${JSON.stringify(modules)};
     (${mainClientCode})(projectKeys);
@@ -894,9 +908,12 @@ function getSharedWorkerCode() {
   const parseKey = extractCode("parsekey");
   const interBus = extractCode("interbus");
   const sharedWorkerCode = extractCode("webworker");
+  const getVertstackTimeoutCode = extractCode("getVertstackTimeout");
 
   return `
     ${parseKey}
+    const vertstackTimeout = ${getVertstackTimeout()};
+    ${getVertstackTimeoutCode}
     ${interBus}
     (${sharedWorkerCode})()
 `;
@@ -1475,11 +1492,14 @@ function injectClientBusCode(
   const parseKey = extractCode("parsekey");
   const bus = extractCode("bus");
   const client = extractCode("client");
+  const getVertstackTimeoutCode = extractCode("getVertstackTimeout");
 
   const busCode = `
     <script>
       const projectKeys = ${JSON.stringify(modules)};
       const projectKey = "${projectKey}";
+      const vertstackTimeout = ${getVertstackTimeout()};
+      ${getVertstackTimeoutCode}
       ${parseKey}
       ${bus}
       (${client})(projectKey, projectKeys);
@@ -1753,7 +1773,7 @@ function loadServerModule(project) {
 }
 
 function forkChildProcess(project) {
-  return spawn(process.execPath, [__filename, '--sandboxed', project], {
+  return spawn(process.execPath, [__filename, '--sandboxed', '--timeout='+getVertstackTimeout(), project], {
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     maxBuffer: 100 * 1024 * 1024,
   });
@@ -1972,13 +1992,14 @@ function client(projectKey) {
 
   window.addEventListener('message', function (event) {
     if (event.data.type === 'getPageId') {
+      window.parent.postMessage({ type: 'setupProjectChannel', projectKey: event.data.projectKey }, '*');
       if (event.source && event.source !== window) {
         event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
       }
     }
   }, false);
 
-  window.parent.postMessage({ type: 'getPageId' }, '*');
+  window.parent.postMessage({ type: 'getPageId', projectKey: projectKey }, '*');
 }
 // </client>
 
@@ -2284,6 +2305,14 @@ function sendOrQueueMessage(message) {
       if (event.source && event.source !== window) {
         event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
       }
+      if (!projectKeys.includes(event.data.projectKey)) {
+        sendOrQueueMessage({ type: 'setupChannel', data: event.data.projectKey });
+      }
+    } else if (event.data.type === 'setupProjectChannel') {
+      if (!workerReady) {
+        setupSingleProjectChannel(event.data.projectKey);
+      }
+      sendOrQueueMessage({ type: 'setupChannel', data: event.data.projectKey });
     }
   }, false);
 
@@ -2296,7 +2325,7 @@ function sendOrQueueMessage(message) {
 function handleSandboxedMode() {
   if (!isSandboxed) return;
 
-  const projectKey = process.argv[process.argv.indexOf("--sandboxed") + 1];
+  const projectKey = process.argv[process.argv.indexOf("--sandboxed") + 2];
   let moduleLoaded = false;
   let serverModule;
   const messageQueue = [];
