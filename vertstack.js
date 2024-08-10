@@ -877,19 +877,7 @@ function setupServer(options, proxyPorts) {
   startServer(server, options);
 }
 
-function getIFrameCode() {
-  const parseKey = extractCode("parsekey");
-  const bus = extractCode("bus");
-  const client = extractCode("client");
-
-  return `
-    ${parseKey}
-    ${bus}
-    (${client})(projectKey);
-  `;
-}
-
-function getMainClientCode() {
+function getMainClientCode(modules) {
   const parseKey = extractCode("parsekey");
   const interBus = extractCode("interbus");
   const mainClientCode = extractCode("mainclient");
@@ -897,7 +885,7 @@ function getMainClientCode() {
   return `
     ${parseKey}
     ${interBus}
-    const projectKeys = ${JSON.stringify(Array.from(projectKeys.keys()))};
+    const projectKeys = ${JSON.stringify(modules)};
     (${mainClientCode})(projectKeys);
 `;
 }
@@ -913,14 +901,14 @@ function getSharedWorkerCode() {
     (${sharedWorkerCode})()
 `;
 }
-
+const htmlRegex = /^\/[a-zA-Z0-9][^\/]+\.html(?:[?#].*)?$/;
 function createHttpServer(proxyPorts) {
   return http.createServer((req, res) => {
     const urlParts = req.url.split("/");
     const projectKey = urlParts[1].split("?")[0];
 
-    if (req.url === "/") {
-      serveMainPage(res);
+    if (req.url === "/" || htmlRegex.test(req.url)) {
+      serveRoot(res, req.url);
     } else if (req.url === "/websocket-worker.js") {
       res.writeHead(200, { "Content-Type": "application/javascript" });
       res.end(getSharedWorkerCode());
@@ -936,9 +924,14 @@ function createHttpServer(proxyPorts) {
     }
   });
 }
-function serveMainPage(res) {
+function serveRoot(res, url) {
+  let file;
+  if (url === "/") {
+    file = "index.html";
+  } else {
+    file = url.split("/").pop().split("?")[0].split("#")[0];
+  }
   const sessionId = createSession();
-  const mainClientCode = getMainClientCode();
   res.writeHead(200, {
     "Content-Type": "text/html",
     "Set-Cookie": `sessionId=${sessionId}; HttpOnly; Path=/`,
@@ -947,16 +940,22 @@ function serveMainPage(res) {
   let htmlContent;
   let usingCustomIndex = false;
   try {
-    htmlContent = fs.readFileSync("index.html", "utf8");
+    htmlContent = fs.readFileSync(file, "utf8");
     usingCustomIndex = true;
   } catch (error) {
+    if (file !== "index.html") {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
     usingCustomIndex = false;
   }
 
   const currentTime = Date.now();
+  let modules = Array.from(projectKeys.keys());
 
   if (usingCustomIndex) {
-    htmlContent = processHtml(htmlContent);
+    [htmlContent, modules] = processHtml(htmlContent);
   } else {
     const projectIframes = Array.from(projectKeys.entries())
       .map(
@@ -994,6 +993,8 @@ function serveMainPage(res) {
   (${extractCode("watchresize")})()
   </script>
   `;
+  const mainClientCode = getMainClientCode(modules);
+
   const bodyScript = `
     <script>
       ${mainClientCode}
@@ -1034,7 +1035,6 @@ async function serveProjectPage(req, res, projectKey) {
       projectPath
     );
 
-    const clientCode = getIFrameCode(projectKey);
     let clientJsPath = '';
     const jsPath = path.join(projectPath, "client.js");
     const mjsPath = path.join(projectPath, "client.mjs");
@@ -1062,7 +1062,6 @@ async function serveProjectPage(req, res, projectKey) {
         res,
         publicDir,
         projectKey,
-        clientCode,
         clientJsPath
       );
     } else if (indexHtmlPath) {
@@ -1070,16 +1069,13 @@ async function serveProjectPage(req, res, projectKey) {
         res,
         indexHtmlPath,
         projectKey,
-        clientCode,
         clientJsPath,
-        true
       );
     } else {
       serveDefaultProjectPage(
         res,
         projectKey,
         projectPath,
-        clientCode,
         clientJsPath
       );
     }
@@ -1191,6 +1187,7 @@ function proxyRequest(req, res, targetPort) {
 
 function processHtml(htmlContent, projectKey = null) {
   const currentTime = Date.now();
+  const modules = new Set();
 
   function rewriteUrls(content) {
     if (projectKey) {
@@ -1216,6 +1213,7 @@ function processHtml(htmlContent, projectKey = null) {
       /<!-- @(\w+)(?:\s+height="(\d+)")?\s*-->/g,
       (match, moduleName, height) => {
         if (projectKeys.has(moduleName)) {
+          modules.add(moduleName);
           const heightAttr = height ? ` height="${height}"` : '';
           return `
           <iframe
@@ -1234,14 +1232,13 @@ function processHtml(htmlContent, projectKey = null) {
     return processedPart;
   });
 
-  return processedParts.join('');
+  return [processedParts.join(''), Array.from(modules)];
 }
 
 function serveDefaultProjectPage(
   res,
   projectKey,
   projectPath,
-  clientCode,
   clientJsPath
 ) {
   res.writeHead(200, { "Content-Type": "text/html" });
@@ -1258,7 +1255,6 @@ function serveDefaultProjectPage(
 
   htmlContent = injectClientBusCode(
     htmlContent,
-    clientCode,
     clientJsPath,
     projectKey
   );
@@ -1321,7 +1317,6 @@ async function serveFromPublicDirectory(
   res,
   publicDir,
   projectKey,
-  clientCode,
   clientJsPath
 ) {
   const relativePath = req.url.split("?")[0].slice(projectKey.length + 2); // +2 to account for the leading slash and potential trailing slash
@@ -1340,7 +1335,6 @@ async function serveFromPublicDirectory(
           res,
           indexPath,
           projectKey,
-          clientCode,
           clientJsPath
         );
       } else {
@@ -1349,7 +1343,7 @@ async function serveFromPublicDirectory(
     } else {
       const contentType = getContentType(filePath);
       if (contentType === "text/html") {
-        await serveHtmlFile(res, filePath, projectKey, clientCode);
+        await serveHtmlFile(res, filePath, projectKey);
       } else {
         const fileContent = fs.readFileSync(filePath);
         res.writeHead(200, { "Content-Type": contentType });
@@ -1366,14 +1360,13 @@ async function serveHtmlFile(
   res,
   filePath,
   projectKey,
-  clientCode,
   clientJsPath = "",
-  forceClientCodeInjection = false
 ) {
   try {
     let htmlContent = fs.readFileSync(filePath, "utf8");
+    let modules = [];
 
-    htmlContent = processHtml(htmlContent, projectKey);
+    [htmlContent, modules] = processHtml(htmlContent, projectKey);
 
     // Dynamic URL rewriting script
     const urlRewriteScript = `
@@ -1458,10 +1451,10 @@ async function serveHtmlFile(
 
     htmlContent = injectClientBusCode(
       htmlContent,
-      clientCode,
       clientJsPath,
       projectKey,
-      forceClientCodeInjection
+      modules,
+
     );
     htmlContent = injectResizeScript(htmlContent, projectKey);
     res.writeHead(200, { "Content-Type": "text/html" });
@@ -1475,15 +1468,21 @@ async function serveHtmlFile(
 
 function injectClientBusCode(
   htmlContent,
-  clientCode,
   clientJsPath,
   projectKey,
-  forceClientCodeInjection = false
+  modules = [],
 ) {
+  const parseKey = extractCode("parsekey");
+  const bus = extractCode("bus");
+  const client = extractCode("client");
+
   const busCode = `
     <script>
+      const projectKeys = ${JSON.stringify(modules)};
       const projectKey = "${projectKey}";
-      ${clientCode}
+      ${parseKey}
+      ${bus}
+      (${client})(projectKey, projectKeys);
       window.bus = bus;
     </script>
   `;
@@ -1506,6 +1505,17 @@ function injectClientBusCode(
             window.bus(key, (payload) => func(payload.data));
           } else {
             window.bus("*." + key, (payload) => func(payload.data));
+          }
+          let altKey = key.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+          if (key !== altKey) {
+            if (altKey.startsWith('_')) {
+              altKey = altKey.slice(1);
+              window.bus(altKey, (payload) => func(payload.data));
+            } else if (altKey.startsWith("$")) {
+              window.bus(altKey, (payload) => func(payload.data));
+            } else {
+              window.bus("*." + altKey, (payload) => func(payload.data));
+            }
           }
         }
       }
@@ -2121,7 +2131,6 @@ function mainClient(projectKeys) {
   let worker;
   let workerReady = false;
   let messageQueue = [];
-  let unloading = false;
   let channels = [];
 
   const pageId = Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -2139,13 +2148,13 @@ function mainClient(projectKeys) {
     worker.port.postMessage({ type: 'ready' });
   }
 
-  function sendOrQueueMessage(message) {
-    if (workerReady && worker) {
-      worker.port.postMessage(message);
-    } else {
-      messageQueue.push(message);
-    }
+function sendOrQueueMessage(message) {
+  if (workerReady && worker) {
+    worker.port.postMessage(message);
+  } else {
+    messageQueue.push(message);
   }
+}
 
   function flushMessageQueue() {
     while (messageQueue.length > 0) {
@@ -2277,10 +2286,6 @@ function mainClient(projectKeys) {
       }
     }
   }, false);
-
-  window.addEventListener('beforeunload', () => {
-    unloading = true;
-  });
 
   setupWorker();
   setupMouseEventSharing();
@@ -2416,6 +2421,17 @@ function handleSandboxedMode() {
           bus(key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
         } else {
           bus("*." + key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+        }
+        let altKey = key.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+        if (key !== altKey) {
+          if (altKey.startsWith('_')) {
+            altKey = altKey.slice(1);
+            bus(altKey, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+          } else if (altKey.startsWith("$")) {
+            bus(altKey, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+          } else {
+            bus("*." + altKey, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+          }
         }
       }
     }

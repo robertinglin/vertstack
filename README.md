@@ -225,6 +225,8 @@ The `$` prefix is used for local messages that should not be sent over the netwo
 ```javascript
 // Send a local message (client-side or server-side)
 bus("$localEvent", { someData: "value" });
+// or
+bus("$local-event", { someData: "value" });
 
 export const $localEvent = (payload) => {
     // Handle the local event
