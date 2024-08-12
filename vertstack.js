@@ -1610,8 +1610,15 @@ function injectResizeScript(htmlContent, projectKey) {
         return parseInt(retVal,10);
     }
 
-    return document.body.getBoundingClientRect().bottom +
-        getComputedBodyStyle('marginBottom');
+    const marginBottom = getComputedBodyStyle('marginBottom')
+    let containerHeight = document.body.getBoundingClientRect().bottom + marginBottom;
+    const scrollHeight = document.body.scrollHeight;
+
+    if (scrollHeight > containerHeight) {
+        containerHeight = scrollHeight;
+    } 
+
+    return containerHeight;
     }
       let shortTimeout;
       let mediumTimeout;
@@ -1640,7 +1647,7 @@ function injectResizeScript(htmlContent, projectKey) {
           }
           }, 100);  
       }
-      
+
       
       window.addEventListener('load', sendHeight);
       window.addEventListener('resize', sendHeight);
