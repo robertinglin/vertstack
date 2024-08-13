@@ -2017,7 +2017,9 @@ function client(projectKey) {
 
   window.addEventListener('message', function (event) {
     if (event.data.type === 'setPageId' && !pageId) {
-      initClient(event.data.pageId);
+      this.setTimeout(() => {
+        initClient(event.data.pageId);
+      })
     }
   }, false);
 
@@ -2043,6 +2045,7 @@ function webWorker() {
   let interBus;
   let unloading = false;
   let queue = [];
+  let clientInstanceQueues = new Map();
 
   function connectWebSocket() {
     ws = new WebSocket(`${self.location.protocol === 'https:' ? 'wss://' : 'ws://'}${self.location.host}`);
@@ -2089,6 +2092,14 @@ function webWorker() {
       message.interBus = true;
       broadcastChannels.get(key).postMessage(message);
     }, pageId);
+
+    if (clientInstanceQueues.has(key + '_' + pageId)) {
+      const queuedMessages = clientInstanceQueues.get(key + '_' + pageId);
+      queuedMessages.forEach((message) => {
+        interBus.receiveInternalMessage(key, message);
+      });
+      clientInstanceQueues.delete(key + '_' + pageId);
+    }
   }
 
   function setupInterBus() {
@@ -2137,7 +2148,14 @@ function webWorker() {
       console.error('Ignoring message for different pageId', message);
       return;
     }
-    interBus.receiveInternalMessage(sourceKey, message);
+    if (!clientInstances.has(sourceKey) || !clientInstances.get(sourceKey).has(pageId)) {
+      if (!clientInstanceQueues.has(sourceKey + '_' + pageId)) {
+        clientInstanceQueues.set(sourceKey + '_' + pageId, []);
+      }
+      clientInstanceQueues.get(sourceKey + '_' + pageId).push(message);
+    } else {
+      interBus.receiveInternalMessage(sourceKey, message);
+    }
   }
 
   self.onconnect = (e) => {
@@ -2333,11 +2351,11 @@ function sendOrQueueMessage(message) {
 
   window.addEventListener('message', function (event) {
     if (event.data.type === 'getPageId') {
-      if (event.source && event.source !== window) {
-        event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
-      }
       if (!projectKeys.includes(event.data.projectKey)) {
         sendOrQueueMessage({ type: 'setupChannel', data: event.data.projectKey });
+      }
+      if (event.source && event.source !== window) {
+        event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
       }
     } else if (event.data.type === 'setupProjectChannel') {
       if (!workerReady) {
