@@ -272,7 +272,7 @@ function createBus(projectKey, handleRemoteDispatch) {
           }
 
           proxy = new Proxy(
-            {},
+            defaultValue ?? {},
             {
               get: (_, prop) => {
                 if (prop === "value") {
@@ -288,9 +288,7 @@ function createBus(projectKey, handleRemoteDispatch) {
                   return message?.data;
                 }
 
-                message = response.find((r) => r.key === normalizedKey);
-
-                return message?.data[prop];
+                return defaultValue?.[prop];
               },
             }
           );
