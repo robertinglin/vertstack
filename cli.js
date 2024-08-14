@@ -32,7 +32,7 @@ async function generateReadme(args) {
 
     readmeContent += '### Start'
     readmeContent += '\n\n```sh\n';
-    readmeContent += 'npx VertStack ' + args.join(' ') + '\n';
+    readmeContent += 'npx vertstack ' + args.join(' ') + '\n';
     readmeContent += '```\n\n';
     readmeContent += '## Modules\n\n';
     readmeContent += modules.map(module => `* ${module}`).join('\n') + '\n\n';
@@ -408,7 +408,7 @@ async function handleUpdate() {
             console.log('Current configuration:', currentArgs);
             
             console.log('Reinstalling VertStack...');
-            execSync(`npx VertStack --install ${currentArgs}`, { stdio: 'inherit' });
+            execSync(`npx vertstack --install ${currentArgs}`, { stdio: 'inherit' });
             console.log('VertStack has been updated to the latest version.');
         } catch (error) {
             console.error('Error updating VertStack:', error.message);
