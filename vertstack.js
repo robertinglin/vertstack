@@ -40,6 +40,7 @@ function parseKey(key, projectKey) {
   let isPrivate = false;
   let isLocal = false;
   let isCrossChannel = false;
+  let wildKey = '';
 
   if (key.startsWith("_")) {
     normalizedKey = key.slice(1);
@@ -50,6 +51,8 @@ function parseKey(key, projectKey) {
   } else if (key.startsWith("#")) {
     normalizedKey = key.slice(1);
     isCrossChannel = true;
+    const keyParts = normalizedKey.split(".");
+    wildKey = keyParts.shift() + '.*.' + keyParts.join('.');
   }
 
   if (
@@ -76,12 +79,13 @@ function parseKey(key, projectKey) {
     isPrivate,
     isLocal,
     isCrossChannel,
+    wildKey
   };
 }
 // </parsekey>
 
 // <watchresize>
-function watchResizeScript () {
+function watchResizeScript() {
   function getIframeUrl(iframe) {
     try {
       let subdir = iframe.contentWindow.location.href;
@@ -195,11 +199,14 @@ function createBus(projectKey, handleRemoteDispatch) {
       if (closed) {
         return;
       }
-      let { normalizedKey } = parseKey(key, projectKey);
+      let { normalizedKey, wildKey } = parseKey(key, projectKey);
       if (normalizedKey.startsWith("_") || normalizedKey.startsWith("$")) {
         normalizedKey = normalizedKey.slice(1);
       }
       let defaultValue = response.find((r) => r.key === normalizedKey)?.data;
+      if (!defaultValue && wildKey) {
+        defaultValue = response.find((r) => r.key === wildKey)?.data;
+      }
       let proxy;
       const primitiveHandler = {
         get(target, prop) {
@@ -235,6 +242,35 @@ function createBus(projectKey, handleRemoteDispatch) {
           break;
         case "undefined":
         default:
+          if (Array.isArray(defaultValue)) {
+            proxy = new Proxy(defaultValue, {
+              get(target, prop) {
+                if (prop === "value") {
+                  return defaultValue;
+                }
+                if (prop === "#") {
+                  return response;
+                }
+                if (prop === Symbol.toPrimitive) {
+                  return function (hint) {
+                    return target.valueOf();
+                  };
+                }
+                if (prop === Symbol.iterator) {
+                  return target[Symbol.iterator].bind(target);
+                }
+
+                if (prop.startsWith("#")) {
+                  prop = prop.slice(1);
+                  message = response.find((r) => r.key === prop);
+                  return message;
+                }
+                return target[prop];
+              },
+            });
+            break;
+          }
+
           proxy = new Proxy(
             {},
             {
@@ -1795,7 +1831,7 @@ function loadServerModule(project) {
 }
 
 function forkChildProcess(project) {
-  return spawn(process.execPath, [__filename, '--sandboxed', '--timeout='+getVertstackTimeout(), project], {
+  return spawn(process.execPath, [__filename, '--sandboxed', '--timeout=' + getVertstackTimeout(), project], {
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     maxBuffer: 100 * 1024 * 1024,
   });
@@ -2218,13 +2254,13 @@ function mainClient(projectKeys) {
     worker.port.postMessage({ type: 'ready' });
   }
 
-function sendOrQueueMessage(message) {
-  if (workerReady && worker) {
-    worker.port.postMessage(message);
-  } else {
-    messageQueue.push(message);
+  function sendOrQueueMessage(message) {
+    if (workerReady && worker) {
+      worker.port.postMessage(message);
+    } else {
+      messageQueue.push(message);
+    }
   }
-}
 
   function flushMessageQueue() {
     while (messageQueue.length > 0) {
