@@ -239,11 +239,15 @@ async function copyVertStackFile() {
     }
 }
 
-async function createOrUpdateScripts() {
+async function createOrUpdateScripts(args) {
     const isWindows = os.platform() === 'win32';
     const serveScript = isWindows ? 'serve.cmd' : 'serve.sh';
     const watchScript = isWindows ? 'watch.cmd' : 'watch.sh';
     const serveDownScript = isWindows ? 'serve-down.cmd' : 'serve-down.sh';
+
+    // Save args to vertstack.args
+    await fs.writeFile('vertstack.args', args.join(' '));
+    console.log('Saved arguments to vertstack.args');
 
     const serveContent = isWindows
         ? `@echo off
@@ -258,8 +262,10 @@ for %%F in (.env*) do (
     )
 )
 
+set /p VERTSTACK_ARGS=<vertstack.args
+
 echo Starting VertStack server...
-start /B "" cmd /c "node %ENV_FILES% vertstack.js ${args.join(' ')} > vertstack.logs 2>&1"
+start /B "" cmd /c "node %ENV_FILES% vertstack.js %VERTSTACK_ARGS% > vertstack.logs 2>&1"
 timeout /t 2 > nul
 for /f "tokens=2 delims=," %%a in ('tasklist /fi "imagename eq node.exe" /fo csv /nh') do (
     echo %%~a > vertstack.pid
@@ -275,7 +281,9 @@ for file in .env*; do
     fi
 done
 
-nohup node $ENV_FILES vertstack.js ${args.join(' ')} > vertstack.logs 2>&1 &
+VERTSTACK_ARGS=$(cat vertstack.args)
+
+nohup node $ENV_FILES vertstack.js $VERTSTACK_ARGS > vertstack.logs 2>&1 &
 PID=$!
 echo $PID > vertstack.pid
 echo "Server started with PID $PID. Check vertstack.logs for output."`;
@@ -293,7 +301,9 @@ for %%F in (.env*) do (
     )
 )
 
-npx nodemon --watch . --ext js,mjs,html,css --exec "node %ENV_FILES% vertstack.js ${args.join(' ')}"`
+set /p VERTSTACK_ARGS=<vertstack.args
+
+npx nodemon --watch . --ext js,mjs,html,css --exec "node %ENV_FILES% vertstack.js %VERTSTACK_ARGS%"`
         : `#!/bin/sh
 ENV_FILES=""
 for file in .env*; do
@@ -302,7 +312,9 @@ for file in .env*; do
     fi
 done
 
-npx nodemon --watch . --ext js,mjs,html,css --exec "node $ENV_FILES vertstack.js ${args.join(' ')}"`;
+VERTSTACK_ARGS=$(cat vertstack.args)
+
+npx nodemon --watch . --ext js,mjs,html,css --exec "node $ENV_FILES vertstack.js $VERTSTACK_ARGS"`;
 
     // serveDownContent remains unchanged
     const serveDownContent = isWindows
@@ -379,6 +391,50 @@ echo "Script execution completed."`;
     }
 
     console.log(`Updated ${serveScript}, ${watchScript}, and ${serveDownScript}`);
+}
+
+function shouldUpdate() {
+    return args.includes('--update');
+}
+
+async function handleUpdate() {
+    const updateIndex = args.indexOf('--update');
+    const updateArgs = args.slice(updateIndex + 1);
+    
+    if (updateArgs.length === 0) {
+        console.log('No update arguments provided. Reinstalling VertStack with current configuration...');
+        try {
+            const currentArgs = await fs.readFile('vertstack.args', 'utf-8');
+            console.log('Current configuration:', currentArgs);
+            
+            console.log('Reinstalling VertStack...');
+            execSync(`npx VertStack --install ${currentArgs}`, { stdio: 'inherit' });
+            console.log('VertStack has been updated to the latest version.');
+        } catch (error) {
+            console.error('Error updating VertStack:', error.message);
+        }
+        return;
+    }
+
+    let currentArgs = await fs.readFile('vertstack.args', 'utf-8');
+    let argArray = currentArgs.split(' ');
+
+    if (updateArgs[0] === '--add') {
+        argArray = [...new Set([...argArray, ...updateArgs.slice(1)])];
+    } else if (updateArgs[0] === '--remove') {
+        argArray = argArray.filter(arg => !updateArgs.slice(1).includes(arg));
+    } else {
+        console.error('Invalid update command. Use --add or --remove followed by module names.');
+        return;
+    }
+
+    const newArgs = argArray.join(' ');
+    await fs.writeFile('vertstack.args', newArgs);
+    console.log('Updated vertstack.args with new configuration:');
+    console.log(newArgs);
+
+    // Regenerate scripts with new configuration
+    await createOrUpdateScripts(argArray);
 }
 
 function shouldInstall() {
@@ -554,12 +610,14 @@ async function updatePackageJson() {
 }
 
 async function main() {
-    if (shouldGenerateReadme()) {
+    if (shouldUpdate()) {
+        await handleUpdate();
+    } else if (shouldGenerateReadme()) {
         await generateReadme(args);
     } else if (shouldInstall()) {
         await updateEnvFileHashes();
         await copyVertStackFile();
-        await createOrUpdateScripts();
+        await createOrUpdateScripts(args);
         console.log('Installation completed. Use serve.cmd/sh to start the server.');
     } else if (shouldUseElectron()) {
         await updatePackageJson();
