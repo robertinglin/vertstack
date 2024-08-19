@@ -983,10 +983,7 @@ function serveRoot(res, url) {
     file = url.split("/").pop().split("?")[0].split("#")[0];
   }
   const sessionId = createSession();
-  res.writeHead(200, {
-    "Content-Type": "text/html",
-    "Set-Cookie": `sessionId=${sessionId}; HttpOnly; Path=/`,
-  });
+
 
   let htmlContent;
   let usingCustomIndex = false;
@@ -1001,6 +998,10 @@ function serveRoot(res, url) {
     }
     usingCustomIndex = false;
   }
+  res.writeHead(200, {
+    "Content-Type": "text/html",
+    "Set-Cookie": `sessionId=${sessionId}; HttpOnly; Path=/`,
+  });
 
   const currentTime = Date.now();
   let modules = Array.from(projectKeys.keys());
