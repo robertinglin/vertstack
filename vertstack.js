@@ -1822,7 +1822,25 @@ function parseCookies(cookieHeader) {
 
 // <module>
 
+function getModuleServerPath(project) {
+  const folderPath = path.join(process.cwd(), project);
+
+  const serverJsPath = path.join(folderPath, "server.js");
+  const serverMjsPath = path.join(folderPath, "server.mjs");
+
+  if (fs.existsSync(serverMjsPath)) {
+    return serverMjsPath;
+  } else if (fs.existsSync(serverJsPath)){
+    return serverMjsPath;
+  }
+  return undefined;
+}
+
 function loadServerModule(project) {
+  const serverModulePath = getModuleServerPath(project);
+  if (!serverModulePath) {
+    return undefined;
+  }
   const child = forkChildProcess(project);
   setupChildProcessListeners(child, project);
   registerModule(child, project);
