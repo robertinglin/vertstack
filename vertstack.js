@@ -1,10 +1,10 @@
-const http = require('http');
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const url = require("url");
-const { spawn } = require('child_process');
-const EventEmitter = require('events');
+const { spawn } = require("child_process");
+const EventEmitter = require("events");
 
 const isSandboxed = process.argv.includes("--sandboxed");
 
@@ -17,7 +17,9 @@ function extractCode(tag) {
 
 let vertstackTimeout = 1000;
 if (process.argv.includes("--timeout=")) {
-  vertstackTimeout = parseInt(process.argv.find((arg) => arg.startsWith("--timeout=")).split("=")[1]);
+  vertstackTimeout = parseInt(
+    process.argv.find((arg) => arg.startsWith("--timeout=")).split("=")[1],
+  );
 }
 
 // <getVertstackTimeout>
@@ -40,7 +42,7 @@ function parseKey(key, projectKey) {
   let isPrivate = false;
   let isLocal = false;
   let isCrossChannel = false;
-  let wildKey = '';
+  let wildKey = "";
 
   if (key.startsWith("_")) {
     normalizedKey = key.slice(1);
@@ -52,7 +54,7 @@ function parseKey(key, projectKey) {
     normalizedKey = key.slice(1);
     isCrossChannel = true;
     const keyParts = normalizedKey.split(".");
-    wildKey = keyParts.shift() + '.*.' + keyParts.join('.');
+    wildKey = keyParts.shift() + ".*." + keyParts.join(".");
   }
 
   if (
@@ -79,7 +81,7 @@ function parseKey(key, projectKey) {
     isPrivate,
     isLocal,
     isCrossChannel,
-    wildKey
+    wildKey,
   };
 }
 // </parsekey>
@@ -90,12 +92,12 @@ function watchResizeScript() {
     try {
       let subdir = iframe.contentWindow.location.href;
       if (subdir) {
-        subdir = subdir.split('/').slice(3).join('/');
+        subdir = subdir.split("/").slice(3).join("/");
       }
       return subdir;
     } catch (e) {
       let subdir = iframe.src;
-      if (subdir.startsWith('/')) {
+      if (subdir.startsWith("/")) {
         subdir = subdir.slice(1);
       }
       return subdir;
@@ -105,7 +107,10 @@ function watchResizeScript() {
   window.addEventListener(
     "message",
     function (event) {
-      if (typeof event.data.projectKey === "string" && typeof event.data.height === "number") {
+      if (
+        typeof event.data.projectKey === "string" &&
+        typeof event.data.height === "number"
+      ) {
         const iframes = document.getElementsByTagName("iframe");
         const projectKey = event.data.projectKey;
 
@@ -113,7 +118,12 @@ function watchResizeScript() {
           const url = getIframeUrl(iframes[i]);
           if (url && url.startsWith(projectKey)) {
             const nextChar = url.charAt(projectKey.length);
-            if (nextChar === "" || nextChar === "/" || nextChar === "?" || nextChar === "#") {
+            if (
+              nextChar === "" ||
+              nextChar === "/" ||
+              nextChar === "?" ||
+              nextChar === "#"
+            ) {
               iframes[i].style.height = event.data.height + "px";
               break;
             }
@@ -124,17 +134,28 @@ function watchResizeScript() {
         }
       }
     },
-    false
+    false,
   );
 }
 // </watchresize>
 
 // <colors>
 const colors = [
-  '\x1b[32m', '\x1b[33m', '\x1b[34m', '\x1b[35m', '\x1b[36m', '\x1b[37m',
-  '\x1b[91m', '\x1b[92m', '\x1b[93m', '\x1b[94m', '\x1b[95m', '\x1b[96m', '\x1b[97m'
+  "\x1b[32m",
+  "\x1b[33m",
+  "\x1b[34m",
+  "\x1b[35m",
+  "\x1b[36m",
+  "\x1b[37m",
+  "\x1b[91m",
+  "\x1b[92m",
+  "\x1b[93m",
+  "\x1b[94m",
+  "\x1b[95m",
+  "\x1b[96m",
+  "\x1b[97m",
 ];
-const resetColor = '\x1b[0m';
+const resetColor = "\x1b[0m";
 
 function getColorForModule(moduleName, modules) {
   const sortedModules = [...modules].sort();
@@ -177,7 +198,8 @@ function createBus(projectKey, handleRemoteDispatch) {
   }
 
   function alwaysDispatchFromBus(key, data, target, pageId) {
-    const requestId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const requestId =
+      Math.random().toString(36).substring(2) + Date.now().toString(36);
     return new Promise(async (resolve, reject) => {
       let { normalizedKey } = parseKey(key, projectKey);
       handleRemoteDispatch({
@@ -191,7 +213,11 @@ function createBus(projectKey, handleRemoteDispatch) {
       setTimeout(() => {
         if (responsePromises.has(requestId)) {
           responsePromises.delete(requestId);
-          console.error("Request timed out: " + requestId + " for key: " + key, data, target);
+          console.error(
+            "Request timed out: " + requestId + " for key: " + key,
+            data,
+            target,
+          );
         }
         resolve([]);
       }, getVertstackTimeout());
@@ -271,27 +297,24 @@ function createBus(projectKey, handleRemoteDispatch) {
             break;
           }
 
-          proxy = new Proxy(
-            defaultValue ?? {},
-            {
-              get: (_, prop) => {
-                if (prop === "value") {
-                  return defaultValue;
-                }
-                if (prop === "#") {
-                  return response;
-                }
-                let message;
-                if (prop.startsWith("#")) {
-                  prop = prop.slice(1);
-                  message = response.find((r) => r.key === prop);
-                  return message?.data;
-                }
+          proxy = new Proxy(defaultValue ?? {}, {
+            get: (_, prop) => {
+              if (prop === "value") {
+                return defaultValue;
+              }
+              if (prop === "#") {
+                return response;
+              }
+              let message;
+              if (prop.startsWith("#")) {
+                prop = prop.slice(1);
+                message = response.find((r) => r.key === prop);
+                return message?.data;
+              }
 
-                return defaultValue?.[prop];
-              },
-            }
-          );
+              return defaultValue?.[prop];
+            },
+          });
           break;
       }
       return proxy;
@@ -330,22 +353,24 @@ function createBus(projectKey, handleRemoteDispatch) {
   async function notifySubscribers(key, payload) {
     let responses = [];
     if (subscribers.has(key)) {
-      await Promise.all(Array.from(subscribers.get(key)).map(async (callback) => {
-        try {
-          const response = await callback(payload);
-          if (response !== undefined) {
-            if (!key.startsWith(projectKey)) {
-              key = projectKey + "." + key;
+      await Promise.all(
+        Array.from(subscribers.get(key)).map(async (callback) => {
+          try {
+            const response = await callback(payload);
+            if (response !== undefined) {
+              if (!key.startsWith(projectKey)) {
+                key = projectKey + "." + key;
+              }
+              responses.push({
+                key,
+                data: response,
+              });
             }
-            responses.push({
-              key,
-              data: response,
-            });
+          } catch (error) {
+            console.error(`Error in subscriber callback for ${key}:`, error);
           }
-        } catch (error) {
-          console.error(`Error in subscriber callback for ${key}:`, error);
-        }
-      }));
+        }),
+      );
     }
     return responses;
   }
@@ -374,7 +399,7 @@ function createBus(projectKey, handleRemoteDispatch) {
       return handleFromServerDispatch(
         message.key,
         message.data,
-        message.target ?? true
+        message.target ?? true,
       );
     }
   };
@@ -415,32 +440,36 @@ function InterBus(sendExternalMessage) {
                   projectRequestPromises.set(responseKey, [resolve]);
                   // channel(message);
                   channel({ ...message, pageId: pageId });
-                })
+                }),
               );
             }
           }
         }
       }
 
-      const responsesByPage = (await Promise.all(Array.from(channelResponsesByPage.keys()).map(async (pageId) => {
-        const channelResponses = channelResponsesByPage.get(pageId);
-        if (channelResponses.length > 0) {
-          const timeout = new Promise((resolve) => {
-            setTimeout(() => {
-              resolve([]);
-            }, getVertstackTimeout());
-          });
-          const response = await Promise.race([
-            Promise.all(channelResponses),
-            timeout,
-          ]);
-          return [pageId, await response.flat()];
-        }
-        return [pageId, []];
-      }))).reduce((acc, [pageId, response]) => {
+      const responsesByPage = (
+        await Promise.all(
+          Array.from(channelResponsesByPage.keys()).map(async (pageId) => {
+            const channelResponses = channelResponsesByPage.get(pageId);
+            if (channelResponses.length > 0) {
+              const timeout = new Promise((resolve) => {
+                setTimeout(() => {
+                  resolve([]);
+                }, getVertstackTimeout());
+              });
+              const response = await Promise.race([
+                Promise.all(channelResponses),
+                timeout,
+              ]);
+              return [pageId, await response.flat()];
+            }
+            return [pageId, []];
+          }),
+        )
+      ).reduce((acc, [pageId, response]) => {
         acc[pageId] = response;
         return acc;
-      }, {})
+      }, {});
 
       sendExternalMessage({
         responseId: message.requestId,
@@ -479,7 +508,7 @@ function InterBus(sendExternalMessage) {
                 new Promise((resolve) => {
                   projectRequestPromises.set(responseKey, [resolve]);
                   channel({ ...message, pageId: pageId });
-                })
+                }),
               );
             }
           }
@@ -489,57 +518,68 @@ function InterBus(sendExternalMessage) {
       let externalPromise;
       if (!parsedKey.isLocal) {
         externalPromise = new Promise((resolve) => {
-          projectRequestPromises.set("external_" + message.requestId, (data) => {
-            resolve(data)
-          });
+          projectRequestPromises.set(
+            "external_" + message.requestId,
+            (data) => {
+              resolve(data);
+            },
+          );
         });
         sendExternalMessage(message);
       } else {
         externalPromise = Promise.resolve([]);
       }
 
-      const internalResponsesByPage = (await Promise.all(Array.from(channelResponsesByPage.keys()).map(async (pageId) => {
-        const channelResponses = channelResponsesByPage.get(pageId);
+      const internalResponsesByPage = (
+        await Promise.all(
+          Array.from(channelResponsesByPage.keys()).map(async (pageId) => {
+            const channelResponses = channelResponsesByPage.get(pageId);
 
-        const timeout = new Promise((resolve) => {
-          setTimeout(() => {
-            resolve([]);
-          }, getVertstackTimeout());
-        });
-        const response = await Promise.race([
-          Promise.all(channelResponses),
-          timeout,
-        ]);
-        return [pageId, response.flat()];
-      }))).reduce((acc, [pageId, response]) => {
+            const timeout = new Promise((resolve) => {
+              setTimeout(() => {
+                resolve([]);
+              }, getVertstackTimeout());
+            });
+            const response = await Promise.race([
+              Promise.all(channelResponses),
+              timeout,
+            ]);
+            return [pageId, response.flat()];
+          }),
+        )
+      ).reduce((acc, [pageId, response]) => {
         acc[pageId] = response;
         return acc;
-      }, {})
+      }, {});
       const externalResponse = await externalPromise;
-      const internalResponses = Object.entries(internalResponsesByPage).map(([pageId, response]) => {
-        return response.map((response) => {
-          return {
-            pageId,
-            ...response,
-            local: true,
-          }
-        });
-      }).flat();
-      const externalResponses = Object.entries(externalResponse).map(([pageId, responses]) => {
-        return responses.map((response) => {
-          return {
-            pageId,
-            ...response,
-            local: false,
-          }
-        });
-      }).flat();
+      const internalResponses = Object.entries(internalResponsesByPage)
+        .map(([pageId, response]) => {
+          return response.map((response) => {
+            return {
+              pageId,
+              ...response,
+              local: true,
+            };
+          });
+        })
+        .flat();
+      const externalResponses = Object.entries(externalResponse)
+        .map(([pageId, responses]) => {
+          return responses.map((response) => {
+            return {
+              pageId,
+              ...response,
+              local: false,
+            };
+          });
+        })
+        .flat();
 
       const responses = [...internalResponses, ...externalResponses];
 
       const channel = channels.get(projectKey);
 
-      if (message.pageId !== '*') {
+      if (message.pageId !== "*") {
         const channelPage = channel.get(message.pageId);
         if (channelPage) {
           channelPage({
@@ -567,11 +607,7 @@ function InterBus(sendExternalMessage) {
           projectRequestPromises.delete(responseKey);
         }
       } else {
-        console.error(
-          "No resolve function found for",
-          responseKey,
-          message
-        );
+        console.error("No resolve function found for", responseKey, message);
       }
     }
   };
@@ -618,41 +654,41 @@ class WebSocket extends EventEmitter {
   static CLOSED = 3;
 
   setupSocket() {
-    this.socket.on('data', (data) => this.handleData(data));
-    this.socket.on('close', (hadError) => this.handleClose(hadError));
-    this.socket.on('error', (error) => this.handleError(error));
+    this.socket.on("data", (data) => this.handleData(data));
+    this.socket.on("close", (hadError) => this.handleClose(hadError));
+    this.socket.on("error", (error) => this.handleError(error));
     // Add a listener for the 'end' event
-    this.socket.on('end', () => this.handleEnd());
+    this.socket.on("end", () => this.handleEnd());
   }
 
   handleUpgrade(request, head) {
-    if (request.headers['sec-websocket-version'] !== '13') {
-      this.close(1002, 'Invalid WebSocket version');
+    if (request.headers["sec-websocket-version"] !== "13") {
+      this.close(1002, "Invalid WebSocket version");
       return;
     }
 
-    const key = request.headers['sec-websocket-key'];
+    const key = request.headers["sec-websocket-key"];
     const acceptKey = this.generateAcceptKey(key);
 
     const responseHeaders = [
-      'HTTP/1.1 101 Switching Protocols',
-      'Upgrade: websocket',
-      'Connection: Upgrade',
+      "HTTP/1.1 101 Switching Protocols",
+      "Upgrade: websocket",
+      "Connection: Upgrade",
       `Sec-WebSocket-Accept: ${acceptKey}`,
-      '',
-      ''
-    ].join('\r\n');
+      "",
+      "",
+    ].join("\r\n");
 
     this.socket.write(responseHeaders);
     this.readyState = WebSocket.OPEN;
-    this.emit('open');
+    this.emit("open");
     this.startPingInterval();
   }
 
   generateAcceptKey(clientKey) {
-    const sha1 = crypto.createHash('sha1');
-    sha1.update(clientKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11');
-    return sha1.digest('base64');
+    const sha1 = crypto.createHash("sha1");
+    sha1.update(clientKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    return sha1.digest("base64");
   }
 
   handleData(data) {
@@ -666,7 +702,7 @@ class WebSocket extends EventEmitter {
         case 0x1: // Text frame
         case 0x2: // Binary frame
           if (frame.fin) {
-            this.emit('message', frame.payload);
+            this.emit("message", frame.payload);
           } else {
             this.fragments.push(frame.payload);
           }
@@ -675,7 +711,7 @@ class WebSocket extends EventEmitter {
           this.fragments.push(frame.payload);
           if (frame.fin) {
             const fullMessage = Buffer.concat(this.fragments);
-            this.emit('message', fullMessage);
+            this.emit("message", fullMessage);
             this.fragments = [];
           }
           break;
@@ -685,7 +721,7 @@ class WebSocket extends EventEmitter {
         case 0x9: // Ping frame
           this.sendPong(frame.payload);
           break;
-        case 0xA: // Pong frame
+        case 0xa: // Pong frame
           this.lastPingTime = Date.now();
           break;
       }
@@ -696,9 +732,9 @@ class WebSocket extends EventEmitter {
     if (this.frameBuffer.length < 2) return null;
 
     const fin = (this.frameBuffer[0] & 0x80) !== 0;
-    const opcode = this.frameBuffer[0] & 0x0F;
+    const opcode = this.frameBuffer[0] & 0x0f;
     const masked = (this.frameBuffer[1] & 0x80) !== 0;
-    let payloadLength = this.frameBuffer[1] & 0x7F;
+    let payloadLength = this.frameBuffer[1] & 0x7f;
     let maskStart = 2;
 
     if (payloadLength === 126) {
@@ -714,7 +750,10 @@ class WebSocket extends EventEmitter {
     const totalLength = maskStart + (masked ? 4 : 0) + payloadLength;
     if (this.frameBuffer.length < totalLength) return null;
 
-    let payload = this.frameBuffer.slice(maskStart + (masked ? 4 : 0), totalLength);
+    let payload = this.frameBuffer.slice(
+      maskStart + (masked ? 4 : 0),
+      totalLength,
+    );
 
     if (masked) {
       const mask = this.frameBuffer.slice(maskStart, maskStart + 4);
@@ -729,7 +768,7 @@ class WebSocket extends EventEmitter {
   }
   send(data, options = { opcode: null }) {
     if (this.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error('WebSocket is not open'));
+      return Promise.reject(new Error("WebSocket is not open"));
     }
 
     const isBinary = options.binary || Buffer.isBuffer(data);
@@ -780,7 +819,7 @@ class WebSocket extends EventEmitter {
     return frame;
   }
 
-  close(code = 1000, reason = '') {
+  close(code = 1000, reason = "") {
     if (this.readyState === WebSocket.CLOSED) return;
 
     const buffer = Buffer.alloc(2 + reason.length);
@@ -793,7 +832,7 @@ class WebSocket extends EventEmitter {
         this.socket.end();
       })
       .catch((error) => {
-        console.error('Error closing WebSocket:', error);
+        console.error("Error closing WebSocket:", error);
         this.forceClose();
       });
   }
@@ -802,37 +841,42 @@ class WebSocket extends EventEmitter {
     this.readyState = WebSocket.CLOSED;
     this.stopPingInterval();
     this.socket.destroy();
-    this.emit('close', 1006, 'Connection closed abnormally');
+    this.emit("close", 1006, "Connection closed abnormally");
   }
 
   handleClose(hadError) {
     if (this.readyState !== WebSocket.CLOSED) {
       this.readyState = WebSocket.CLOSED;
       this.stopPingInterval();
-      this.emit('close', hadError ? 1006 : 1000, hadError ? 'Connection closed abnormally' : 'Normal closure');
+      this.emit(
+        "close",
+        hadError ? 1006 : 1000,
+        hadError ? "Connection closed abnormally" : "Normal closure",
+      );
     }
   }
 
   handleError(error) {
-    this.emit('error', error);
-    if (error.code === 'ECONNRESET') {
+    this.emit("error", error);
+    if (error.code === "ECONNRESET") {
       this.forceClose();
     }
   }
 
   handleEnd() {
     if (this.readyState === WebSocket.OPEN) {
-      this.close(1000, 'Connection ended by the other party');
+      this.close(1000, "Connection ended by the other party");
     }
   }
 
   startPingInterval() {
     this.pingInterval = setInterval(() => {
       if (Date.now() - this.lastPingTime > 30000) {
-        this.close(1001, 'Ping timeout');
+        this.close(1001, "Ping timeout");
       } else {
-        this.send(Buffer.alloc(0), { opcode: 0x9 })
-          .catch(() => this.close(1001, 'Ping failed'));
+        this.send(Buffer.alloc(0), { opcode: 0x9 }).catch(() =>
+          this.close(1001, "Ping failed"),
+        );
       }
     }, 1000);
   }
@@ -844,7 +888,7 @@ class WebSocket extends EventEmitter {
   }
 
   sendPong(payload) {
-    const pongFrame = this.createFrame(0xA, payload);
+    const pongFrame = this.createFrame(0xa, payload);
     this.socket.write(pongFrame);
   }
 }
@@ -857,7 +901,7 @@ class WebSocketServer extends EventEmitter {
   }
 
   setupServerListeners() {
-    this.server.on('upgrade', (request, socket, head) => {
+    this.server.on("upgrade", (request, socket, head) => {
       this.handleUpgrade(request, socket, head);
     });
   }
@@ -865,7 +909,7 @@ class WebSocketServer extends EventEmitter {
   handleUpgrade(request, socket, head) {
     const ws = new WebSocket(socket);
     ws.handleUpgrade(request, head);
-    this.emit('connection', ws, request);
+    this.emit("connection", ws, request);
   }
 
   listen(port, callback) {
@@ -881,15 +925,19 @@ function initModule(projectKey, session, pageId) {
   // Initialize the server module for this session
   if (serverModules.has(projectKey)) {
     const child = serverModules.get(projectKey);
-    session.interBus.registerChannel(projectKey, (message) => {
-      if (!message.target) {
-        message.target = sessionId;
-      }
-      child.send(message);
-    }, pageId);
+    session.interBus.registerChannel(
+      projectKey,
+      (message) => {
+        if (!message.target) {
+          message.target = sessionId;
+        }
+        child.send(message);
+      },
+      pageId,
+    );
     child.send({ key: projectKey, data: "connect", target: sessionId, pageId });
   }
-};
+}
 
 function closeSessionForModule(session) {
   const sessionId = session.sessionId;
@@ -963,9 +1011,11 @@ function createHttpServer(proxyPorts) {
     } else if (req.url === "/websocket-worker.js") {
       res.writeHead(200, { "Content-Type": "application/javascript" });
       res.end(getSharedWorkerCode());
-
     } else if (projectKeys.has(projectKey)) {
-      if (req.url.startsWith(`/${projectKey}/api`) || req.url.startsWith(`/${projectKey}/p/`)) {
+      if (
+        req.url.startsWith(`/${projectKey}/api`) ||
+        req.url.startsWith(`/${projectKey}/p/`)
+      ) {
         serveApiRequest(req, res, projectKey, proxyPorts);
       } else {
         serveProjectPage(req, res, projectKey);
@@ -983,7 +1033,6 @@ function serveRoot(res, url) {
     file = url.split("/").pop().split("?")[0].split("#")[0];
   }
   const sessionId = createSession();
-
 
   let htmlContent;
   let usingCustomIndex = false;
@@ -1019,7 +1068,7 @@ function serveRoot(res, url) {
       frameBorder="0"
       scrolling="no">
     </iframe>
-  `
+  `,
       )
       .join("");
 
@@ -1083,11 +1132,10 @@ async function serveProjectPage(req, res, projectKey) {
   try {
     const projectPath = projectKeys.get(projectKey);
 
-    const { publicDir, indexHtmlPath } = await findProjectStructure(
-      projectPath
-    );
+    const { publicDir, indexHtmlPath } =
+      await findProjectStructure(projectPath);
 
-    let clientJsPath = '';
+    let clientJsPath = "";
     const jsPath = path.join(projectPath, "client.js");
     const mjsPath = path.join(projectPath, "client.mjs");
 
@@ -1099,12 +1147,11 @@ async function serveProjectPage(req, res, projectKey) {
       console.log(`No client found for project ${projectKey}`);
     }
 
-
-    if (req.url.split('/').pop().includes('.')) {
-      const filePath = path.join(projectPath, req.url.split('/').pop());
+    if (req.url.split("/").pop().includes(".")) {
+      const filePath = path.join(projectPath, req.url.split("/").pop());
       if (fs.existsSync(filePath)) {
         const fileStream = fs.createReadStream(filePath);
-        res.writeHead('200', { 'Content-Type': getContentType(filePath) });
+        res.writeHead("200", { "Content-Type": getContentType(filePath) });
         fileStream.pipe(res);
         return;
       }
@@ -1114,22 +1161,12 @@ async function serveProjectPage(req, res, projectKey) {
         res,
         publicDir,
         projectKey,
-        clientJsPath
-      );
-    } else if (indexHtmlPath) {
-      await serveHtmlFile(
-        res,
-        indexHtmlPath,
-        projectKey,
         clientJsPath,
       );
+    } else if (indexHtmlPath) {
+      await serveHtmlFile(res, indexHtmlPath, projectKey, clientJsPath);
     } else {
-      serveDefaultProjectPage(
-        res,
-        projectKey,
-        projectPath,
-        clientJsPath
-      );
+      serveDefaultProjectPage(res, projectKey, projectPath, clientJsPath);
     }
   } catch (error) {
     console.error("Error in serveProjectPage:", error);
@@ -1140,8 +1177,8 @@ async function serveProjectPage(req, res, projectKey) {
 function parseCookies(cookieHeader) {
   const cookies = {};
   if (cookieHeader) {
-    cookieHeader.split(';').forEach(cookie => {
-      const parts = cookie.split('=');
+    cookieHeader.split(";").forEach((cookie) => {
+      const parts = cookie.split("=");
       const name = parts[0].trim();
       const value = parts[1].trim();
       cookies[name] = value;
@@ -1176,11 +1213,11 @@ async function serveApiRequest(req, res, projectKey, proxyPorts) {
 
   // Parse body data
   let bodyData = {};
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
+  if (req.method !== "GET" && req.method !== "HEAD") {
     bodyData = await new Promise((resolve) => {
-      let body = '';
-      req.on('data', chunk => body += chunk.toString());
-      req.on('end', () => {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk.toString()));
+      req.on("end", () => {
         try {
           resolve(JSON.parse(body));
         } catch (error) {
@@ -1190,29 +1227,27 @@ async function serveApiRequest(req, res, projectKey, proxyPorts) {
     });
   }
 
-  const requestKey = req.url.substring(1).split('?')[0].replaceAll("/", ".");
+  const requestKey = req.url.substring(1).split("?")[0].replaceAll("/", ".");
 
   const message = {
     key: "_" + requestKey,
     data: {
       method: req.method,
       query: queryParams,
-      body: bodyData
+      body: bodyData,
     },
-    requestId: Math.random().toString(36).substring(2) + Date.now().toString(36),
+    requestId:
+      Math.random().toString(36).substring(2) + Date.now().toString(36),
     target: session.sessionId,
   };
-
 
   try {
     const responses = await session.interBus.receiveExternalMessage(
       message,
-      false
+      false,
     );
 
-    const response = responses?.find(
-      (r) => r.key === requestKey
-    );
+    const response = responses?.find((r) => r.key === requestKey);
 
     if (!responses?.length) {
       res.writeHead(204);
@@ -1231,11 +1266,11 @@ async function serveApiRequest(req, res, projectKey, proxyPorts) {
 
 function proxyRequest(req, res, targetPort) {
   const options = {
-    hostname: '0.0.0.0',
+    hostname: "0.0.0.0",
     port: targetPort,
-    path: '/' + req.url.split('/p/')[1],
+    path: "/" + req.url.split("/p/")[1],
     method: req.method,
-    headers: { ...req.headers }
+    headers: { ...req.headers },
   };
 
   const proxyReq = http.request(options, (proxyRes) => {
@@ -1245,10 +1280,10 @@ function proxyRequest(req, res, targetPort) {
 
   req.pipe(proxyReq, { end: true });
 
-  proxyReq.on('error', (error) => {
-    console.error('Proxy request error:', error);
-    res.writeHead(500, { 'Content-Type': 'text/plain' });
-    res.end('Proxy request failed');
+  proxyReq.on("error", (error) => {
+    console.error("Proxy request error:", error);
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("Proxy request failed");
   });
 }
 
@@ -1260,7 +1295,7 @@ function processHtml(htmlContent, projectKey = null) {
     if (projectKey) {
       return content.replace(
         /(<[^>]+\s)(src|href)=(["'])\/(?!\/)/gi,
-        `$1$2=$3/${projectKey}/`
+        `$1$2=$3/${projectKey}/`,
       );
     }
     return content;
@@ -1281,7 +1316,7 @@ function processHtml(htmlContent, projectKey = null) {
       (match, moduleName, height) => {
         if (projectKeys.has(moduleName)) {
           modules.add(moduleName);
-          const heightAttr = height ? ` height="${height}"` : '';
+          const heightAttr = height ? ` height="${height}"` : "";
           return `
           <iframe
             src="/${moduleName}?t=${currentTime}"
@@ -1293,21 +1328,16 @@ function processHtml(htmlContent, projectKey = null) {
           `;
         }
         return match;
-      }
+      },
     );
 
     return processedPart;
   });
 
-  return [processedParts.join(''), Array.from(modules)];
+  return [processedParts.join(""), Array.from(modules)];
 }
 
-function serveDefaultProjectPage(
-  res,
-  projectKey,
-  projectPath,
-  clientJsPath
-) {
+function serveDefaultProjectPage(res, projectKey, projectPath, clientJsPath) {
   res.writeHead(200, { "Content-Type": "text/html" });
   let htmlContent = `
     <html>
@@ -1320,11 +1350,7 @@ function serveDefaultProjectPage(
     </html>
   `;
 
-  htmlContent = injectClientBusCode(
-    htmlContent,
-    clientJsPath,
-    projectKey
-  );
+  htmlContent = injectClientBusCode(htmlContent, clientJsPath, projectKey);
   htmlContent = injectResizeScript(htmlContent, projectKey);
 
   res.end(htmlContent);
@@ -1384,7 +1410,7 @@ async function serveFromPublicDirectory(
   res,
   publicDir,
   projectKey,
-  clientJsPath
+  clientJsPath,
 ) {
   const relativePath = req.url.split("?")[0].slice(projectKey.length + 2); // +2 to account for the leading slash and potential trailing slash
   const filePath = path.join(publicDir, relativePath);
@@ -1398,12 +1424,7 @@ async function serveFromPublicDirectory(
         : path.join(filePath, "index.html");
 
       if (fileExists(indexPath)) {
-        await serveHtmlFile(
-          res,
-          indexPath,
-          projectKey,
-          clientJsPath
-        );
+        await serveHtmlFile(res, indexPath, projectKey, clientJsPath);
       } else {
         serveNotFound(res);
       }
@@ -1423,12 +1444,7 @@ async function serveFromPublicDirectory(
   }
 }
 
-async function serveHtmlFile(
-  res,
-  filePath,
-  projectKey,
-  clientJsPath = "",
-) {
+async function serveHtmlFile(res, filePath, projectKey, clientJsPath = "") {
   try {
     let htmlContent = fs.readFileSync(filePath, "utf8");
     let modules = [];
@@ -1521,7 +1537,6 @@ async function serveHtmlFile(
       clientJsPath,
       projectKey,
       modules,
-
     );
     htmlContent = injectResizeScript(htmlContent, projectKey);
     res.writeHead(200, { "Content-Type": "text/html" });
@@ -1557,14 +1572,17 @@ function injectClientBusCode(
     </script>
   `;
 
-  const clientScript = clientJsPath ? `
+  const clientScript = clientJsPath
+    ? `
     <script type="module" src="${clientJsPath}"></script>
-  ` : '';
+  `
+    : "";
 
-  const exportHandlerScript = clientJsPath ? `
+  const exportHandlerScript = clientJsPath
+    ? `
     <script type="module">
       import * as clientExports from '${clientJsPath}';
-      
+
       // Register exported functions
       for (let [key, func] of Object.entries(clientExports)) {
         if (typeof func === 'function' && key !== 'default') {
@@ -1590,16 +1608,23 @@ function injectClientBusCode(
         }
       }
     </script>
-  ` : '';
+  `
+    : "";
 
   if (htmlContent.includes("</head>")) {
-    htmlContent = htmlContent.replace("</head>", `${busCode}${clientScript}${exportHandlerScript}</head>`);
+    htmlContent = htmlContent.replace(
+      "</head>",
+      `${busCode}${clientScript}${exportHandlerScript}</head>`,
+    );
   } else if (htmlContent.includes("<body>")) {
-    htmlContent = htmlContent.replace("<body>", `${busCode}${clientScript}${exportHandlerScript}<body>`);
+    htmlContent = htmlContent.replace(
+      "<body>",
+      `${busCode}${clientScript}${exportHandlerScript}<body>`,
+    );
   } else if (htmlContent.includes("<html>")) {
     htmlContent = htmlContent.replace(
       "<html>",
-      `<html><head>${busCode}${clientScript}${exportHandlerScript}</head>`
+      `<html><head>${busCode}${clientScript}${exportHandlerScript}</head>`,
     );
   } else {
     htmlContent = `<head>${busCode}${clientScript}${exportHandlerScript}</head>${htmlContent}`;
@@ -1619,7 +1644,7 @@ function injectResizeScript(htmlContent, projectKey) {
                 return parseInt(value,base);
             }
 
-            var 
+            var
                 style = el.style.left,
                 runtimeStyle = el.runtimeStyle.left;
 
@@ -1632,7 +1657,7 @@ function injectResizeScript(htmlContent, projectKey) {
             return value;
         }
 
-        var 
+        var
             el = document.body,
             retVal = 0;
 
@@ -1640,7 +1665,7 @@ function injectResizeScript(htmlContent, projectKey) {
             retVal =  document.defaultView.getComputedStyle(el, null)[prop];
         } else {//IE8 & below
             retVal =  getPixelValue(el.currentStyle[prop]);
-        } 
+        }
 
         return parseInt(retVal,10);
     }
@@ -1651,7 +1676,7 @@ function injectResizeScript(htmlContent, projectKey) {
 
     if (scrollHeight > containerHeight) {
         containerHeight = scrollHeight;
-    } 
+    }
 
     return containerHeight;
     }
@@ -1666,32 +1691,32 @@ function injectResizeScript(htmlContent, projectKey) {
           if (iframeHeight !== getIFrameHeight()) {
             sendHeight();
           }
-        }, 10); 
-        
+        }, 10);
+
         clearTimeout(mediumTimeout);
         mediumTimeout = setTimeout(() => {
           if (iframeHeight !== getIFrameHeight()) {
             sendHeight();
           }
           }, 50);
-        
+
         clearTimeout(longTimeout);
         longTimeout = setTimeout(() => {
           if (iframeHeight !== getIFrameHeight()) {
             sendHeight();
           }
-          }, 100);  
+          }, 100);
       }
 
-      
+
       window.addEventListener('load', sendHeight);
       window.addEventListener('resize', sendHeight);
 
       const observer = new MutationObserver(sendHeight);
-      observer.observe(document.body, { 
-        attributes: true, 
-        childList: true, 
-        subtree: true 
+      observer.observe(document.body, {
+        attributes: true,
+        childList: true,
+        subtree: true
       });
     (${extractCode("watchresize")})();
     </script>
@@ -1760,7 +1785,7 @@ function handleWebSocketConnection(ws, request) {
 function setupWebSocketListeners(ws, session) {
   ws.on("message", (message) => handleWebSocketMessage(message, session));
   ws.on("close", () => handleWebSocketClose(session));
-  ws.on('error', (error) => {
+  ws.on("error", (error) => {
     // Handle the error appropriately
   });
 }
@@ -1770,14 +1795,23 @@ async function handleWebSocketMessage(messageString, session) {
 
   if (message.data === "connect") {
     initModule(message.key, session, message.pageId);
-  } else if (message.data === 'disconnect') {
+  } else if (message.data === "disconnect") {
     const child = serverModules.get(message.key);
     if (child) {
-      child.send({ key: message.key, data: "disconnect", target: session.sessionId, pageId: message.pageId });
+      child.send({
+        key: message.key,
+        data: "disconnect",
+        target: session.sessionId,
+        pageId: message.pageId,
+      });
     }
   } else {
     if (message.target === "*") {
-      console.error("Client attempted to send a broadcast message", session.id, message);
+      console.error(
+        "Client attempted to send a broadcast message",
+        session.id,
+        message,
+      );
     } else {
       if (!message.target) {
         message.target = session.sessionId;
@@ -1799,7 +1833,7 @@ function sendInitialConnectionInfo(ws, session) {
       data: {
         sessionId: session.sessionId,
       },
-    })
+    }),
   );
 }
 
@@ -1830,7 +1864,7 @@ function getModuleServerPath(project) {
 
   if (fs.existsSync(serverMjsPath)) {
     return serverMjsPath;
-  } else if (fs.existsSync(serverJsPath)){
+  } else if (fs.existsSync(serverJsPath)) {
     return serverMjsPath;
   }
   return undefined;
@@ -1848,30 +1882,36 @@ function loadServerModule(project) {
 }
 
 function forkChildProcess(project) {
-  return spawn(process.execPath, [__filename, '--sandboxed', '--timeout=' + getVertstackTimeout(), project], {
-    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    maxBuffer: 100 * 1024 * 1024,
-  });
+  return spawn(
+    process.execPath,
+    [__filename, "--sandboxed", "--timeout=" + getVertstackTimeout(), project],
+    {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      maxBuffer: 100 * 1024 * 1024,
+    },
+  );
 }
 
 function setupChildProcessListeners(child, project) {
   const prefix = createColoredPrefix(project, projectKeys.keys());
 
-  child.stdout.on('data', (data) => {
+  child.stdout.on("data", (data) => {
     process.stdout.write(`${prefix} ${data}`);
   });
 
-  child.stderr.on('data', (data) => {
+  child.stderr.on("data", (data) => {
     process.stderr.write(`${prefix} \x1b[31m${data}\x1b[0m`);
   });
 
-  child.on('message', (message) => handleChildProcessMessage(message, project, child));
-  child.on('error', (error) => handleChildProcessError(error, project));
-  child.on('exit', (code) => handleChildProcessExit(code, project));
+  child.on("message", (message) =>
+    handleChildProcessMessage(message, project, child),
+  );
+  child.on("error", (error) => handleChildProcessError(error, project));
+  child.on("exit", (code) => handleChildProcessExit(code, project));
 }
 
 function handleChildProcessMessage(message, project, child) {
-  if (typeof message === 'string') {
+  if (typeof message === "string") {
     const prefix = createColoredPrefix(project, projectKeys.keys());
     console.log(`${prefix} ${message}`);
     return;
@@ -1882,13 +1922,19 @@ function handleChildProcessMessage(message, project, child) {
 
 function broadcastMessageToSessions(message, sourceProject) {
   sessions.forEach(async (session) => {
-    if (session.ws && (message.target === "*" || session.sessionId === message.target)) {
+    if (
+      session.ws &&
+      (message.target === "*" || session.sessionId === message.target)
+    ) {
       const messageToSend = { ...message };
       if (message.target === "*") {
         messageToSend.target = session.sessionId;
         messageToSend.pageId = "*";
       }
-      await session.interBus.receiveInternalMessage(sourceProject, messageToSend);
+      await session.interBus.receiveInternalMessage(
+        sourceProject,
+        messageToSend,
+      );
     }
   });
 }
@@ -1907,11 +1953,11 @@ function registerModule(child, project) {
   serverModules.set(project, child);
 }
 
-process.on('SIGINT', () => {
-  console.log('Caught interrupt signal');
+process.on("SIGINT", () => {
+  console.log("Caught interrupt signal");
   serverModules.forEach((child, project) => {
     console.log(`Terminating child process for ${project}`);
-    child.kill('SIGTERM');
+    child.kill("SIGTERM");
   });
   process.exit();
 });
@@ -1948,7 +1994,7 @@ function client(projectKey) {
       broadcastChannel.postMessage({
         responseId: message.requestId,
         data: res,
-        pageId
+        pageId,
       });
     }
   };
@@ -1958,11 +2004,15 @@ function client(projectKey) {
 
     broadcastChannel.postMessage({ key: projectKey, data: "connect", pageId });
 
-    window.addEventListener('beforeunload', () => {
-      broadcastChannel.postMessage({ key: projectKey, data: "disconnect", pageId });
+    window.addEventListener("beforeunload", () => {
+      broadcastChannel.postMessage({
+        key: projectKey,
+        data: "disconnect",
+        pageId,
+      });
     });
 
-    queue.forEach(message => {
+    queue.forEach((message) => {
       message.pageId = pageId;
       broadcastChannel.postMessage(message);
     });
@@ -1971,7 +2021,15 @@ function client(projectKey) {
   }
 
   function setupMouseEventSharing() {
-    const mouseEvents = ['mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'wheel'];
+    const mouseEvents = [
+      "mousedown",
+      "mouseup",
+      "mousemove",
+      "click",
+      "dblclick",
+      "contextmenu",
+      "wheel",
+    ];
 
     function getIframeOffset() {
       let win = window;
@@ -1994,23 +2052,36 @@ function client(projectKey) {
       }
 
       const eventProps = [
-        'clientX', 'clientY', 'pageX', 'pageY', 'screenX', 'screenY',
-        'offsetX', 'offsetY', 'movementX', 'movementY',
-        'button', 'buttons', 'ctrlKey', 'shiftKey', 'altKey', 'metaKey'
+        "clientX",
+        "clientY",
+        "pageX",
+        "pageY",
+        "screenX",
+        "screenY",
+        "offsetX",
+        "offsetY",
+        "movementX",
+        "movementY",
+        "button",
+        "buttons",
+        "ctrlKey",
+        "shiftKey",
+        "altKey",
+        "metaKey",
       ];
 
       const iframeOffset = getIframeOffset();
       const eventData = {
         type: event.type,
         iframeOffset: iframeOffset,
-        projectKey
+        projectKey,
       };
 
-      eventProps.forEach(prop => {
+      eventProps.forEach((prop) => {
         if (event[prop] !== undefined) {
-          if (prop.endsWith('X')) {
+          if (prop.endsWith("X")) {
             eventData[prop] = event[prop] + iframeOffset.x;
-          } else if (prop.endsWith('Y')) {
+          } else if (prop.endsWith("Y")) {
             eventData[prop] = event[prop] + iframeOffset.y;
           } else {
             eventData[prop] = event[prop];
@@ -2018,74 +2089,99 @@ function client(projectKey) {
         }
       });
 
-      window.top.postMessage({
-        type: 'childMouseEvent',
-        event: eventData
-      }, '*');
+      window.top.postMessage(
+        {
+          type: "childMouseEvent",
+          event: eventData,
+        },
+        "*",
+      );
     }
 
     function propagateEventToChildren(eventData) {
-      const iframes = Array.from(document.getElementsByTagName('iframe'));
-      iframes.forEach(iframe => {
+      const iframes = Array.from(document.getElementsByTagName("iframe"));
+      iframes.forEach((iframe) => {
         const iframeRect = iframe.getBoundingClientRect();
         const iframeEvent = {
           ...eventData,
           clientX: eventData.clientX - iframeRect.left,
           clientY: eventData.clientY - iframeRect.top,
-          pageX: eventData.pageX - iframeRect.left + iframe.contentWindow.pageXOffset,
-          pageY: eventData.pageY - iframeRect.top + iframe.contentWindow.pageYOffset
+          pageX:
+            eventData.pageX -
+            iframeRect.left +
+            iframe.contentWindow.pageXOffset,
+          pageY:
+            eventData.pageY - iframeRect.top + iframe.contentWindow.pageYOffset,
         };
-        iframe.contentWindow.postMessage({
-          type: 'mouseEvent',
-          event: iframeEvent
-        }, '*');
+        iframe.contentWindow.postMessage(
+          {
+            type: "mouseEvent",
+            event: iframeEvent,
+          },
+          "*",
+        );
       });
     }
 
-    mouseEvents.forEach(eventType => {
+    mouseEvents.forEach((eventType) => {
       window.addEventListener(eventType, sendEventToParent, false);
     });
 
-    window.addEventListener('message', event => {
-      if (event.data.type === 'mouseEvent') {
-        const eventData = event.data.event;
+    window.addEventListener(
+      "message",
+      (event) => {
+        if (event.data.type === "mouseEvent") {
+          const eventData = event.data.event;
 
-        const recreatedEvent = new MouseEvent(eventData.type, {
-          ...eventData,
-          bubbles: true,
-          cancelable: true
-        });
+          const recreatedEvent = new MouseEvent(eventData.type, {
+            ...eventData,
+            bubbles: true,
+            cancelable: true,
+          });
 
-        recreatedEvent.isSynthetic = true;
+          recreatedEvent.isSynthetic = true;
 
-        if (eventData.projectKey !== projectKey) {
-          document.dispatchEvent(recreatedEvent);
+          if (eventData.projectKey !== projectKey) {
+            document.dispatchEvent(recreatedEvent);
+          }
+
+          // Propagate the event to nested iframes
+          propagateEventToChildren(eventData);
         }
-
-        // Propagate the event to nested iframes
-        propagateEventToChildren(eventData);
-      }
-    }, true);
+      },
+      true,
+    );
   }
 
-  window.addEventListener('message', function (event) {
-    if (event.data.type === 'setPageId' && !pageId) {
-      this.setTimeout(() => {
-        initClient(event.data.pageId);
-      })
-    }
-  }, false);
-
-  window.addEventListener('message', function (event) {
-    if (event.data.type === 'getPageId') {
-      window.parent.postMessage({ type: 'setupProjectChannel', projectKey: event.data.projectKey }, '*');
-      if (event.source && event.source !== window) {
-        event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
+  window.addEventListener(
+    "message",
+    function (event) {
+      if (event.data.type === "setPageId" && !pageId) {
+        this.setTimeout(() => {
+          initClient(event.data.pageId);
+        });
       }
-    }
-  }, false);
+    },
+    false,
+  );
 
-  window.parent.postMessage({ type: 'getPageId', projectKey: projectKey }, '*');
+  window.addEventListener(
+    "message",
+    function (event) {
+      if (event.data.type === "getPageId") {
+        window.parent.postMessage(
+          { type: "setupProjectChannel", projectKey: event.data.projectKey },
+          "*",
+        );
+        if (event.source && event.source !== window) {
+          event.source.postMessage({ type: "setPageId", pageId: pageId }, "*");
+        }
+      }
+    },
+    false,
+  );
+
+  window.parent.postMessage({ type: "getPageId", projectKey: projectKey }, "*");
 }
 // </client>
 
@@ -2101,25 +2197,27 @@ function webWorker() {
   let clientInstanceQueues = new Map();
 
   function connectWebSocket() {
-    ws = new WebSocket(`${self.location.protocol === 'https:' ? 'wss://' : 'ws://'}${self.location.host}`);
+    ws = new WebSocket(
+      `${self.location.protocol === "https:" ? "wss://" : "ws://"}${self.location.host}`,
+    );
     ws.onopen = () => {
       if (queue.length > 0) {
-        queue.forEach(message => ws.send(JSON.stringify(message)));
+        queue.forEach((message) => ws.send(JSON.stringify(message)));
         queue = [];
       }
-      broadcast({ type: 'ready' });
-    }
+      broadcast({ type: "ready" });
+    };
     ws.onclose = () => {
-      broadcast({ type: 'close' });
-      broadcastChannels.forEach(channel => channel.close());
+      broadcast({ type: "close" });
+      broadcastChannels.forEach((channel) => channel.close());
       self.close();
     };
-    ws.onerror = (error) => broadcast({ type: 'error', error });
+    ws.onerror = (error) => broadcast({ type: "error", error });
     ws.onmessage = (event) => handleWebSocketMessage(event.data);
   }
 
   function broadcast(message) {
-    clients.forEach(client => client.postMessage(message));
+    clients.forEach((client) => client.postMessage(message));
   }
 
   function handleWebSocketMessage(data) {
@@ -2141,17 +2239,21 @@ function webWorker() {
     }
     clientInstances.get(key).add(pageId);
 
-    interBus.registerChannel(key, (message) => {
-      message.interBus = true;
-      broadcastChannels.get(key).postMessage(message);
-    }, pageId);
+    interBus.registerChannel(
+      key,
+      (message) => {
+        message.interBus = true;
+        broadcastChannels.get(key).postMessage(message);
+      },
+      pageId,
+    );
 
-    if (clientInstanceQueues.has(key + '_' + pageId)) {
-      const queuedMessages = clientInstanceQueues.get(key + '_' + pageId);
+    if (clientInstanceQueues.has(key + "_" + pageId)) {
+      const queuedMessages = clientInstanceQueues.get(key + "_" + pageId);
       queuedMessages.forEach((message) => {
         interBus.receiveInternalMessage(key, message);
       });
-      clientInstanceQueues.delete(key + '_' + pageId);
+      clientInstanceQueues.delete(key + "_" + pageId);
     }
   }
 
@@ -2168,14 +2270,16 @@ function webWorker() {
     const pageId = message.pageId;
 
     if (!pageId) {
-      console.error('Received message without pageId', message);
+      console.error("Received message without pageId", message);
       return;
     }
 
     if (message.data === "connect" && message.key === sourceKey) {
       connectClientInstance(sourceKey, pageId);
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ key: sourceKey, data: "connect", pageId: pageId }));
+        ws.send(
+          JSON.stringify({ key: sourceKey, data: "connect", pageId: pageId }),
+        );
       } else {
         queue.push({ key: sourceKey, data: "connect", pageId: pageId });
       }
@@ -2183,7 +2287,13 @@ function webWorker() {
     } else if (message.data === "disconnect" && message.key === sourceKey) {
       setTimeout(() => {
         if (unloading) return;
-        ws.send(JSON.stringify({ key: sourceKey, data: "disconnect", pageId: pageId }));
+        ws.send(
+          JSON.stringify({
+            key: sourceKey,
+            data: "disconnect",
+            pageId: pageId,
+          }),
+        );
       });
       if (clientInstances.has(sourceKey)) {
         clientInstances.get(sourceKey).delete(pageId);
@@ -2195,17 +2305,22 @@ function webWorker() {
       return;
     }
     if (message.target === "*") {
-      throw new Error("Client cannot handle broadcast messages, " + JSON.stringify(message));
+      throw new Error(
+        "Client cannot handle broadcast messages, " + JSON.stringify(message),
+      );
     }
     if (message.pageId && message.pageId !== pageId) {
-      console.error('Ignoring message for different pageId', message);
+      console.error("Ignoring message for different pageId", message);
       return;
     }
-    if (!clientInstances.has(sourceKey) || !clientInstances.get(sourceKey).has(pageId)) {
-      if (!clientInstanceQueues.has(sourceKey + '_' + pageId)) {
-        clientInstanceQueues.set(sourceKey + '_' + pageId, []);
+    if (
+      !clientInstances.has(sourceKey) ||
+      !clientInstances.get(sourceKey).has(pageId)
+    ) {
+      if (!clientInstanceQueues.has(sourceKey + "_" + pageId)) {
+        clientInstanceQueues.set(sourceKey + "_" + pageId, []);
       }
-      clientInstanceQueues.get(sourceKey + '_' + pageId).push(message);
+      clientInstanceQueues.get(sourceKey + "_" + pageId).push(message);
     } else {
       interBus.receiveInternalMessage(sourceKey, message);
     }
@@ -2218,7 +2333,7 @@ function webWorker() {
     if (!ws || ws.readyState === WebSocket.CLOSED) {
       connectWebSocket();
     } else {
-      port.postMessage({ type: 'ready' });
+      port.postMessage({ type: "ready" });
     }
 
     if (!interBus) {
@@ -2228,10 +2343,10 @@ function webWorker() {
     port.onmessage = (event) => {
       const { type, data } = event.data;
       switch (type) {
-        case 'setupChannel':
+        case "setupChannel":
           setupBroadcastChannel(data);
           break;
-        case 'send':
+        case "send":
           handleProjectChannelMessage(data.sourceKey, { data: data.message });
           break;
       }
@@ -2242,10 +2357,10 @@ function webWorker() {
 
   self.onclose = () => {
     unloading = true;
-    clients.forEach(client => client.close());
+    clients.forEach((client) => client.close());
     ws.close();
-    broadcastChannels.forEach(channel => channel.close());
-  }
+    broadcastChannels.forEach((channel) => channel.close());
+  };
 }
 // </webworker>
 
@@ -2256,19 +2371,20 @@ function mainClient(projectKeys) {
   let messageQueue = [];
   let channels = [];
 
-  const pageId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+  const pageId =
+    Math.random().toString(36).substring(2) + Date.now().toString(36);
 
   function setupWorker() {
-    worker = new SharedWorker('websocket-worker.js');
+    worker = new SharedWorker("websocket-worker.js");
     worker.port.onmessage = handleWorkerMessage;
     worker.port.start();
 
-    projectKeys.forEach(key => {
-      sendOrQueueMessage({ type: 'setupChannel', data: key });
+    projectKeys.forEach((key) => {
+      sendOrQueueMessage({ type: "setupChannel", data: key });
       setupSingleProjectChannel(key);
     });
 
-    worker.port.postMessage({ type: 'ready' });
+    worker.port.postMessage({ type: "ready" });
   }
 
   function sendOrQueueMessage(message) {
@@ -2289,16 +2405,16 @@ function mainClient(projectKeys) {
   function handleWorkerMessage(event) {
     const { type, data } = event.data;
     switch (type) {
-      case 'ready':
+      case "ready":
         workerReady = true;
         flushMessageQueue();
         cleanupBroadcastChannels();
         break;
-      case 'close':
+      case "close":
         console.log("WebSocket connection closed, reloading...");
         setTimeout(() => location.reload(), 250);
         break;
-      case 'error':
+      case "error":
         console.error("WebSocket error:", data);
         break;
     }
@@ -2312,11 +2428,11 @@ function mainClient(projectKeys) {
 
   function handleProjectChannelMessage(sourceKey, event) {
     const message = event.data;
-    sendOrQueueMessage({ type: 'send', data: { sourceKey, message } });
+    sendOrQueueMessage({ type: "send", data: { sourceKey, message } });
   }
 
   function cleanupBroadcastChannels() {
-    channels.forEach(channel => {
+    channels.forEach((channel) => {
       channel.onmessage = null;
       channel.close();
     });
@@ -2327,8 +2443,8 @@ function mainClient(projectKeys) {
     const iframes = new Set();
 
     function findAllIframes(win = window) {
-      const frames = Array.from(win.document.getElementsByTagName('iframe'));
-      frames.forEach(frame => {
+      const frames = Array.from(win.document.getElementsByTagName("iframe"));
+      frames.forEach((frame) => {
         iframes.add(frame.contentWindow);
         findAllIframes(frame.contentWindow);
       });
@@ -2336,10 +2452,10 @@ function mainClient(projectKeys) {
 
     function initIframeTracking() {
       findAllIframes();
-      const observer = new MutationObserver(mutations => {
-        mutations.forEach(mutation => {
-          mutation.addedNodes.forEach(node => {
-            if (node.tagName === 'IFRAME') {
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          mutation.addedNodes.forEach((node) => {
+            if (node.tagName === "IFRAME") {
               iframes.add(node.contentWindow);
               findAllIframes(node.contentWindow);
             }
@@ -2353,7 +2469,7 @@ function mainClient(projectKeys) {
       const bodyStyle = window.getComputedStyle(document.body);
       return {
         x: parseInt(bodyStyle.marginLeft, 10),
-        y: parseInt(bodyStyle.marginTop, 10)
+        y: parseInt(bodyStyle.marginTop, 10),
       };
     }
     function propagateEvent(originalEvent) {
@@ -2367,56 +2483,85 @@ function mainClient(projectKeys) {
             clientX: originalEvent.clientX - rect.left - docOffset.x,
             clientY: originalEvent.clientY - rect.top - docOffset.y,
             pageX: originalEvent.pageX - rect.left - docOffset.x,
-            pageY: originalEvent.pageY - rect.top - docOffset.y
+            pageY: originalEvent.pageY - rect.top - docOffset.y,
           };
-          frameWindow.postMessage({
-            type: 'mouseEvent',
-            event: adjustedEvent
-          }, '*');
+          frameWindow.postMessage(
+            {
+              type: "mouseEvent",
+              event: adjustedEvent,
+            },
+            "*",
+          );
         }
       });
     }
 
-    window.addEventListener('message', event => {
-      if (event.data.type === 'childMouseEvent') {
-        propagateEvent(event.data.event);
-      }
-    }, true);
+    window.addEventListener(
+      "message",
+      (event) => {
+        if (event.data.type === "childMouseEvent") {
+          propagateEvent(event.data.event);
+        }
+      },
+      true,
+    );
 
-    const mouseEvents = ['mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'wheel'];
-    mouseEvents.forEach(eventType => {
-      window.addEventListener(eventType, (event) => {
-        const docOffset = getDocumentOffset();
-        const adjustedEvent = {
-          type: event.type,
-          clientX: event.clientX + docOffset.x,
-          clientY: event.clientY + docOffset.y,
-          pageX: event.pageX + docOffset.x,
-          pageY: event.pageY + docOffset.y,
-        };
-        propagateEvent(adjustedEvent);
-      }, true);
+    const mouseEvents = [
+      "mousedown",
+      "mouseup",
+      "mousemove",
+      "click",
+      "dblclick",
+      "contextmenu",
+      "wheel",
+    ];
+    mouseEvents.forEach((eventType) => {
+      window.addEventListener(
+        eventType,
+        (event) => {
+          const docOffset = getDocumentOffset();
+          const adjustedEvent = {
+            type: event.type,
+            clientX: event.clientX + docOffset.x,
+            clientY: event.clientY + docOffset.y,
+            pageX: event.pageX + docOffset.x,
+            pageY: event.pageY + docOffset.y,
+          };
+          propagateEvent(adjustedEvent);
+        },
+        true,
+      );
     });
 
     initIframeTracking();
     window.rescanIframes = initIframeTracking;
   }
 
-  window.addEventListener('message', function (event) {
-    if (event.data.type === 'getPageId') {
-      if (!projectKeys.includes(event.data.projectKey)) {
-        sendOrQueueMessage({ type: 'setupChannel', data: event.data.projectKey });
+  window.addEventListener(
+    "message",
+    function (event) {
+      if (event.data.type === "getPageId") {
+        if (!projectKeys.includes(event.data.projectKey)) {
+          sendOrQueueMessage({
+            type: "setupChannel",
+            data: event.data.projectKey,
+          });
+        }
+        if (event.source && event.source !== window) {
+          event.source.postMessage({ type: "setPageId", pageId: pageId }, "*");
+        }
+      } else if (event.data.type === "setupProjectChannel") {
+        if (!workerReady) {
+          setupSingleProjectChannel(event.data.projectKey);
+        }
+        sendOrQueueMessage({
+          type: "setupChannel",
+          data: event.data.projectKey,
+        });
       }
-      if (event.source && event.source !== window) {
-        event.source.postMessage({ type: 'setPageId', pageId: pageId }, '*');
-      }
-    } else if (event.data.type === 'setupProjectChannel') {
-      if (!workerReady) {
-        setupSingleProjectChannel(event.data.projectKey);
-      }
-      sendOrQueueMessage({ type: 'setupChannel', data: event.data.projectKey });
-    }
-  }, false);
+    },
+    false,
+  );
 
   setupWorker();
   setupMouseEventSharing();
@@ -2436,7 +2581,8 @@ function handleSandboxedMode() {
 
   async function loadModule(project) {
     const folderPath = path.join(process.cwd(), project);
-    const { moduleCreator, modulePath, exports } = await findAndLoadModule(folderPath);
+    const { moduleCreator, modulePath, exports } =
+      await findAndLoadModule(folderPath);
     moduleLoaded = true;
     return { moduleCreator, exports };
   }
@@ -2450,18 +2596,22 @@ function handleSandboxedMode() {
       return {
         moduleCreator: module.default || module,
         modulePath: serverMjsPath,
-        exports: module
+        exports: module,
       };
     } else if (fs.existsSync(serverJsPath)) {
       const module = require(serverJsPath);
       return {
         moduleCreator: module.default || module,
         modulePath: serverJsPath,
-        exports: module
+        exports: module,
       };
     } else {
       console.warn(`No module found for project ${path.basename(folderPath)}`);
-      return { moduleCreator: () => { }, modulePath: "No module found", exports: {} };
+      return {
+        moduleCreator: () => {},
+        modulePath: "No module found",
+        exports: {},
+      };
     }
   }
 
@@ -2480,7 +2630,8 @@ function handleSandboxedMode() {
         cleanup();
       }
     } else {
-      const [bus, handleExternal] = sessions.get(`${message.target}_${message.pageId}`) || [];
+      const [bus, handleExternal] =
+        sessions.get(`${message.target}_${message.pageId}`) || [];
       if (!bus) {
         let responses = [];
         for (const [key, [bus, handleExternal]] of sessions.entries()) {
@@ -2541,40 +2692,57 @@ function handleSandboxedMode() {
       });
       closeBus();
     };
-    sessions.set(`${sessionId}_${pageId}`, [bus, handleExternal, cleanupSession]);
+    sessions.set(`${sessionId}_${pageId}`, [
+      bus,
+      handleExternal,
+      cleanupSession,
+    ]);
 
     for (let [key, func] of Object.entries(serverModule.exports)) {
-      if (typeof func === 'function' && key !== 'default') {
-        if (key.startsWith('_')) {
+      if (typeof func === "function" && key !== "default") {
+        if (key.startsWith("_")) {
           key = key.slice(1);
-          bus(key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
-        } else if (key.startsWith('$')) {
-          bus(key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+          bus(key, (payload) =>
+            func(payload.data, bus, sessionId, pageId, payload),
+          );
+        } else if (key.startsWith("$")) {
+          bus(key, (payload) =>
+            func(payload.data, bus, sessionId, pageId, payload),
+          );
         } else {
-          bus("*." + key, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+          bus("*." + key, (payload) =>
+            func(payload.data, bus, sessionId, pageId, payload),
+          );
         }
-        let altKey = key.replace(/[A-Z]/g, m => "-" + m.toLowerCase());
+        let altKey = key.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
         if (key !== altKey) {
-          if (altKey.startsWith('_')) {
+          if (altKey.startsWith("_")) {
             altKey = altKey.slice(1);
-            bus(altKey, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+            bus(altKey, (payload) =>
+              func(payload.data, bus, sessionId, pageId, payload),
+            );
           } else if (altKey.startsWith("$")) {
-            bus(altKey, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+            bus(altKey, (payload) =>
+              func(payload.data, bus, sessionId, pageId, payload),
+            );
           } else {
-            bus("*." + altKey, (payload) => func(payload.data, bus, sessionId, pageId, payload));
+            bus("*." + altKey, (payload) =>
+              func(payload.data, bus, sessionId, pageId, payload),
+            );
           }
         }
       }
     }
 
-    const cleanup = serverModule.moduleCreator(bus, sessionId, pageId) ?? (() => { });
+    const cleanup =
+      serverModule.moduleCreator(bus, sessionId, pageId) ?? (() => {});
     cleanups.push(cleanup);
-    if (typeof cleanup === 'function') {
+    if (typeof cleanup === "function") {
       cleanupCallbacks.push(cleanup);
     }
   }
 
-  process.on('message', handleIncomingMessage);
+  process.on("message", handleIncomingMessage);
 
   process.on("SIGTERM", async () => {
     for (const cleanup of cleanupCallbacks) {
@@ -2603,19 +2771,22 @@ if (isSandboxed) {
         if (arg.startsWith("--")) {
           acc[0].push(arg.slice(2).split("="));
         } else {
-          const [module, proxyPort] = arg.split('=');
+          const [module, proxyPort] = arg.split("=");
           acc[1].push({ module, proxyPort });
         }
         return acc;
       },
-      [[], []]
+      [[], []],
     );
-    const options = prefixedArgs.reduce((acc, [key, value]) => {
-      acc[key] = value;
-      return acc;
-    }, {
-      port: "3000",
-    });
+    const options = prefixedArgs.reduce(
+      (acc, [key, value]) => {
+        acc[key] = value;
+        return acc;
+      },
+      {
+        port: "3000",
+      },
+    );
 
     const proxyPorts = new Map();
     modules.forEach(({ module, proxyPort }) => {
@@ -2625,14 +2796,14 @@ if (isSandboxed) {
       projectKeys.set(module, module);
     });
 
-    Promise.all(
-      modules.map(({ module }) => loadServerModule(module))
-    ).then(() => {
-      setupServer(options, proxyPorts);
-    });
+    Promise.all(modules.map(({ module }) => loadServerModule(module))).then(
+      () => {
+        setupServer(options, proxyPorts);
+      },
+    );
   } else {
     console.log(
-      "No server modules specified. Run with: node script.js module1[=proxyPort] module2[=proxyPort] ..."
+      "No server modules specified. Run with: node script.js module1[=proxyPort] module2[=proxyPort] ...",
     );
   }
 }
