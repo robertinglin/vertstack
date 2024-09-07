@@ -1001,6 +1001,7 @@ function getSharedWorkerCode() {
 `;
 }
 const htmlRegex = /^\/[a-zA-Z0-9][^\/]+\.html(?:[?#].*)?$/;
+
 function createHttpServer(proxyPorts) {
   return http.createServer((req, res) => {
     const urlParts = req.url.split("/");
@@ -1011,6 +1012,8 @@ function createHttpServer(proxyPorts) {
     } else if (req.url === "/websocket-worker.js") {
       res.writeHead(200, { "Content-Type": "application/javascript" });
       res.end(getSharedWorkerCode());
+    } else if (req.url.startsWith("/node_modules/")) {
+      serveNodeModules(req, res);
     } else if (projectKeys.has(projectKey)) {
       if (
         req.url.startsWith(`/${projectKey}/api`) ||
@@ -1025,6 +1028,242 @@ function createHttpServer(proxyPorts) {
     }
   });
 }
+
+function serveNodeModules(req, res) {
+  const modulePath = path.join(process.cwd(), req.url);
+  try {
+    const resolvedPath = resolveModulePath(modulePath);
+
+    if (resolvedPath) {
+      const fileContent = fs.readFileSync(resolvedPath);
+      res.writeHead(200, { "Content-Type": getContentType(resolvedPath) });
+      res.end(fileContent);
+    } else {
+      serveNotFound(res);
+    }
+  } catch (error) {
+    console.error("Error serving node module:", error);
+    serveNotFound(res);
+  }
+}
+
+function resolveModulePath(modulePath) {
+  if (fs.existsSync(modulePath)) {
+    const stats = fs.statSync(modulePath);
+    if (stats.isFile()) {
+      return modulePath;
+    } else if (stats.isDirectory()) {
+      return resolveDirectory(modulePath);
+    }
+  }
+
+  // Check for bundled versions in dist directory
+  const distPath = path.join(path.dirname(modulePath), "dist");
+  if (fs.existsSync(distPath)) {
+    const fileName = path.basename(modulePath);
+    const bundledVersions = [
+      path.join(distPath, `${fileName}.min.mjs`),
+      path.join(distPath, `${fileName}.mjs`),
+      path.join(distPath, `${fileName}.min.js`),
+      path.join(distPath, `${fileName}.js`),
+    ];
+
+    for (const bundled of bundledVersions) {
+      if (fs.existsSync(bundled)) {
+        return bundled;
+      }
+    }
+  }
+
+  // Handle sub-module imports (e.g., 'pixi.js/webworker')
+  const parts = modulePath.split(path.sep);
+  const moduleNameIndex =
+    parts.findIndex((part) => part === "node_modules") + 1;
+  if (moduleNameIndex > 0 && moduleNameIndex < parts.length - 1) {
+    const basePath = parts.slice(0, moduleNameIndex + 1).join(path.sep);
+    const subModule = parts.slice(moduleNameIndex + 1).join(path.sep);
+    return resolveSubModule(basePath, subModule);
+  }
+
+  // If not found, check if removing the last part reveals a directory
+  const parentDir = path.dirname(modulePath);
+  if (fs.existsSync(parentDir) && fs.statSync(parentDir).isDirectory()) {
+    return resolveDirectory(parentDir);
+  }
+
+  return null;
+}
+
+function resolveDirectory(dirPath) {
+  const packageJsonPath = path.join(dirPath, "package.json");
+  if (fs.existsSync(packageJsonPath)) {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+
+    // Check bundles field
+    if (packageJson.bundles && Array.isArray(packageJson.bundles)) {
+      const mainBundle = packageJson.bundles[0]; // First bundle is considered the main one
+      if (mainBundle) {
+        const bundlePath = resolveBundlePath(dirPath, mainBundle);
+        if (bundlePath) return bundlePath;
+      }
+    }
+
+    // Check for bundled/minified versions in dist directory
+    const distPath = path.join(dirPath, "dist");
+    if (fs.existsSync(distPath)) {
+      const bundleFiles = [
+        `${packageJson.name}.min.mjs`,
+        `${packageJson.name}.mjs`,
+        `${packageJson.name}.min.js`,
+        `${packageJson.name}.js`,
+        "index.min.mjs",
+        "index.mjs",
+        "index.min.js",
+        "index.js",
+      ];
+      for (const file of bundleFiles) {
+        const bundlePath = path.join(distPath, file);
+        if (fs.existsSync(bundlePath)) {
+          return bundlePath;
+        }
+      }
+    }
+
+    // Check exports field
+    if (packageJson.exports) {
+      const mainExport = packageJson.exports["."];
+      if (typeof mainExport === "string") {
+        return resolvePath(dirPath, mainExport);
+      } else if (mainExport && (mainExport.import || mainExport.require)) {
+        return resolvePath(dirPath, mainExport.import || mainExport.require);
+      }
+    }
+
+    // Fallback to module or main fields
+    if (packageJson.module) {
+      return resolvePath(dirPath, packageJson.module);
+    }
+    if (packageJson.main) {
+      return resolvePath(dirPath, packageJson.main);
+    }
+  }
+
+  // Fallback to index files
+  const indexFiles = ["index.mjs", "index.js", "index.cjs"];
+  for (const indexFile of indexFiles) {
+    const indexPath = path.join(dirPath, indexFile);
+    if (fs.existsSync(indexPath)) {
+      return indexPath;
+    }
+  }
+
+  return null;
+}
+
+function resolveSubModule(basePath, subModule) {
+  const packageJsonPath = path.join(basePath, "package.json");
+  if (fs.existsSync(packageJsonPath)) {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+
+    // Check bundles field for sub-modules
+    if (packageJson.bundles && Array.isArray(packageJson.bundles)) {
+      const matchingBundle = packageJson.bundles.find(
+        (bundle) =>
+          bundle.target.includes(subModule) ||
+          bundle.module.includes(subModule),
+      );
+      if (matchingBundle) {
+        const bundlePath = resolveBundlePath(
+          basePath,
+          matchingBundle,
+          subModule,
+        );
+        if (bundlePath) return bundlePath;
+      }
+    }
+
+    if (packageJson.exports && packageJson.exports[`./${subModule}`]) {
+      const subModuleExport = packageJson.exports[`./${subModule}`];
+      if (typeof subModuleExport === "string") {
+        return resolvePath(basePath, subModuleExport);
+      } else if (
+        subModuleExport &&
+        (subModuleExport.import || subModuleExport.require)
+      ) {
+        return resolvePath(
+          basePath,
+          subModuleExport.import || subModuleExport.require,
+        );
+      }
+    }
+  }
+
+  // If not found in exports, try direct resolution
+  const directPath = path.join(basePath, subModule);
+  if (fs.existsSync(directPath)) {
+    return directPath;
+  }
+
+  return null;
+}
+
+function resolvePath(basePath, relativePath) {
+  const fullPath = path.join(basePath, relativePath);
+  return fs.existsSync(fullPath) ? fullPath : null;
+}
+
+function resolveBundlePath(basePath, bundle, subModule = "") {
+  const targetPath = path.join(basePath, bundle.target);
+  const modulePath = path.join(basePath, bundle.module);
+
+  // Prioritize .mjs files over .js files
+  const pathsToCheck = [
+    modulePath.replace(".mjs", ".min.mjs"),
+    modulePath,
+    targetPath.replace(".js", ".min.mjs"),
+    targetPath.replace(".js", ".mjs"),
+    targetPath.replace(".js", ".min.js"),
+    targetPath,
+  ];
+
+  for (const pathToCheck of pathsToCheck) {
+    if (fs.existsSync(pathToCheck) && pathToCheck.includes(subModule)) {
+      return pathToCheck;
+    }
+  }
+
+  return null;
+}
+
+function generateImportMap(projectPath, rootPath) {
+  const importMap = { imports: {} };
+  const nodeModulesPaths = [
+    path.join(rootPath, "node_modules"),
+    path.join(projectPath, "node_modules"),
+  ];
+
+  nodeModulesPaths.forEach((modulesPath) => {
+    if (fs.existsSync(modulesPath)) {
+      const modules = fs.readdirSync(modulesPath);
+      modules.forEach((module) => {
+        if (module.startsWith("@")) {
+          const scopedModules = fs.readdirSync(path.join(modulesPath, module));
+          scopedModules.forEach((scopedModule) => {
+            const fullModuleName = `${module}/${scopedModule}`;
+            const modulePath = path.join(modulesPath, fullModuleName);
+            importMap.imports[fullModuleName] =
+              `/node_modules/${fullModuleName}`;
+          });
+        } else {
+          importMap.imports[module] = `/node_modules/${module}`;
+        }
+      });
+    }
+  });
+
+  return importMap;
+}
+
 function serveRoot(res, url) {
   let file;
   if (url === "/") {
@@ -1128,9 +1367,11 @@ function serveRoot(res, url) {
 
   res.end(htmlContent);
 }
+
 async function serveProjectPage(req, res, projectKey) {
   try {
     const projectPath = projectKeys.get(projectKey);
+    const rootPath = process.cwd();
 
     const { publicDir, indexHtmlPath } =
       await findProjectStructure(projectPath);
@@ -1147,6 +1388,8 @@ async function serveProjectPage(req, res, projectKey) {
       console.log(`No client found for project ${projectKey}`);
     }
 
+    const importMap = generateImportMap(projectPath, rootPath);
+
     if (req.url.split("/").pop().includes(".")) {
       const filePath = path.join(projectPath, req.url.split("/").pop());
       if (fs.existsSync(filePath)) {
@@ -1162,11 +1405,24 @@ async function serveProjectPage(req, res, projectKey) {
         publicDir,
         projectKey,
         clientJsPath,
+        importMap,
       );
     } else if (indexHtmlPath) {
-      await serveHtmlFile(res, indexHtmlPath, projectKey, clientJsPath);
+      await serveHtmlFile(
+        res,
+        indexHtmlPath,
+        projectKey,
+        clientJsPath,
+        importMap,
+      );
     } else {
-      serveDefaultProjectPage(res, projectKey, projectPath, clientJsPath);
+      serveDefaultProjectPage(
+        res,
+        projectKey,
+        projectPath,
+        clientJsPath,
+        importMap,
+      );
     }
   } catch (error) {
     console.error("Error in serveProjectPage:", error);
@@ -1337,11 +1593,20 @@ function processHtml(htmlContent, projectKey = null) {
   return [processedParts.join(""), Array.from(modules)];
 }
 
-function serveDefaultProjectPage(res, projectKey, projectPath, clientJsPath) {
+function serveDefaultProjectPage(
+  res,
+  projectKey,
+  projectPath,
+  clientJsPath,
+  importMap,
+) {
   res.writeHead(200, { "Content-Type": "text/html" });
   let htmlContent = `
     <html>
       <head>
+        <script type="importmap">
+          ${JSON.stringify(importMap, null, 2)}
+        </script>
       </head>
       <body>
         <h1>Project: ${path.basename(projectPath)}</h1>
@@ -1411,8 +1676,9 @@ async function serveFromPublicDirectory(
   publicDir,
   projectKey,
   clientJsPath,
+  importMap,
 ) {
-  const relativePath = req.url.split("?")[0].slice(projectKey.length + 2); // +2 to account for the leading slash and potential trailing slash
+  const relativePath = req.url.split("?")[0].slice(projectKey.length + 2);
   const filePath = path.join(publicDir, relativePath);
 
   try {
@@ -1424,14 +1690,20 @@ async function serveFromPublicDirectory(
         : path.join(filePath, "index.html");
 
       if (fileExists(indexPath)) {
-        await serveHtmlFile(res, indexPath, projectKey, clientJsPath);
+        await serveHtmlFile(
+          res,
+          indexPath,
+          projectKey,
+          clientJsPath,
+          importMap,
+        );
       } else {
         serveNotFound(res);
       }
     } else {
       const contentType = getContentType(filePath);
       if (contentType === "text/html") {
-        await serveHtmlFile(res, filePath, projectKey);
+        await serveHtmlFile(res, filePath, projectKey, clientJsPath, importMap);
       } else {
         const fileContent = fs.readFileSync(filePath);
         res.writeHead(200, { "Content-Type": contentType });
@@ -1444,93 +1716,117 @@ async function serveFromPublicDirectory(
   }
 }
 
-async function serveHtmlFile(res, filePath, projectKey, clientJsPath = "") {
+function injectUrlRewriteScript(htmlContent, projectKey) {
+  // Dynamic URL rewriting script
+  const urlRewriteScript = `
+    <script>
+      (function() {
+        const projectKey = '${projectKey}';
+        const urlAttributes = ['src', 'href'];
+
+        function shouldRewriteUrl(url) {
+          return url && url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/' + projectKey + '/');
+        }
+
+        function rewriteUrl(url) {
+          return shouldRewriteUrl(url) ? '/' + projectKey + url : url;
+        }
+
+        function rewriteUrlsInElement(element) {
+          if (element.nodeType === Node.ELEMENT_NODE) {
+            urlAttributes.forEach(attr => {
+              if (element.hasAttribute(attr)) {
+                const originalUrl = element.getAttribute(attr);
+                if (shouldRewriteUrl(originalUrl) && element.tagName !== 'IFRAME') {
+                  element.setAttribute(attr, rewriteUrl(originalUrl));
+                }
+              }
+            });
+
+            if (element.tagName === 'STYLE' || element.tagName === 'SCRIPT') {
+              element.textContent = element.textContent.replace(
+                /url\\(['"]?(\\/[^'"]+)['"]?\\)/g,
+                (match, url) => shouldRewriteUrl(url) ? \`url("\${rewriteUrl(url)}")\` : match
+              );
+            }
+
+            if (element.style && element.style.cssText) {
+              element.style.cssText = element.style.cssText.replace(
+                /url\\(['"]?(\\/[^'"]+)['"]?\\)/g,
+                (match, url) => shouldRewriteUrl(url) ? \`url("\${rewriteUrl(url)}")\` : match
+              );
+            }
+          }
+        }
+
+        function handleMutations(mutations) {
+          mutations.forEach(mutation => {
+            if (mutation.type === 'childList') {
+              mutation.addedNodes.forEach(node => {
+                rewriteUrlsInElement(node);
+                if (node.querySelectorAll) {
+                  node.querySelectorAll('*').forEach(rewriteUrlsInElement);
+                }
+              });
+            } else if (mutation.type === 'attributes') {
+              const attrName = mutation.attributeName;
+              if (urlAttributes.includes(attrName)) {
+                const element = mutation.target;
+                const attrValue = element.getAttribute(attrName);
+                if (shouldRewriteUrl(attrValue)) {
+                  element.setAttribute(attrName, rewriteUrl(attrValue));
+                }
+              }
+            }
+          });
+        }
+
+        const observer = new MutationObserver(handleMutations);
+        observer.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: urlAttributes
+        });
+
+        // Rewrite URLs in the initial DOM
+        document.querySelectorAll('*').forEach(rewriteUrlsInElement);
+      })();
+    </script>
+  `;
+  // Inject the URL rewriting script at the beginning of the <head> tag
+  htmlContent = htmlContent.replace("<head>", "<head>\n" + urlRewriteScript);
+
+  return htmlContent;
+}
+
+async function serveHtmlFile(
+  res,
+  filePath,
+  projectKey,
+  clientJsPath,
+  importMap,
+) {
   try {
     let htmlContent = fs.readFileSync(filePath, "utf8");
     let modules = [];
 
     [htmlContent, modules] = processHtml(htmlContent, projectKey);
 
-    // Dynamic URL rewriting script
-    const urlRewriteScript = `
-      <script>
-        (function() {
-          const projectKey = '${projectKey}';
-          const urlAttributes = ['src', 'href'];
-
-          function shouldRewriteUrl(url) {
-            return url && url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/' + projectKey + '/');
-          }
-
-          function rewriteUrl(url) {
-            return shouldRewriteUrl(url) ? '/' + projectKey + url : url;
-          }
-
-          function rewriteUrlsInElement(element) {
-            if (element.nodeType === Node.ELEMENT_NODE) {
-              urlAttributes.forEach(attr => {
-                if (element.hasAttribute(attr)) {
-                  const originalUrl = element.getAttribute(attr);
-                  if (shouldRewriteUrl(originalUrl) && element.tagName !== 'IFRAME') {
-                    element.setAttribute(attr, rewriteUrl(originalUrl));
-                  }
-                }
-              });
-
-              if (element.tagName === 'STYLE' || element.tagName === 'SCRIPT') {
-                element.textContent = element.textContent.replace(
-                  /url\\(['"]?(\\/[^'"]+)['"]?\\)/g,
-                  (match, url) => shouldRewriteUrl(url) ? \`url("\${rewriteUrl(url)}")\` : match
-                );
-              }
-
-              if (element.style && element.style.cssText) {
-                element.style.cssText = element.style.cssText.replace(
-                  /url\\(['"]?(\\/[^'"]+)['"]?\\)/g,
-                  (match, url) => shouldRewriteUrl(url) ? \`url("\${rewriteUrl(url)}")\` : match
-                );
-              }
-            }
-          }
-
-          function handleMutations(mutations) {
-            mutations.forEach(mutation => {
-              if (mutation.type === 'childList') {
-                mutation.addedNodes.forEach(node => {
-                  rewriteUrlsInElement(node);
-                  if (node.querySelectorAll) {
-                    node.querySelectorAll('*').forEach(rewriteUrlsInElement);
-                  }
-                });
-              } else if (mutation.type === 'attributes') {
-                const attrName = mutation.attributeName;
-                if (urlAttributes.includes(attrName)) {
-                  const element = mutation.target;
-                  const attrValue = element.getAttribute(attrName);
-                  if (shouldRewriteUrl(attrValue)) {
-                    element.setAttribute(attrName, rewriteUrl(attrValue));
-                  }
-                }
-              }
-            });
-          }
-
-          const observer = new MutationObserver(handleMutations);
-          observer.observe(document.documentElement, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: urlAttributes
-          });
-
-          // Rewrite URLs in the initial DOM
-          document.querySelectorAll('*').forEach(rewriteUrlsInElement);
-        })();
+    // Inject import map
+    const importMapScript = `
+      <script type="importmap">
+        ${JSON.stringify(importMap, null, 2)}
       </script>
     `;
 
-    // Inject the URL rewriting script at the beginning of the <head> tag
-    htmlContent = htmlContent.replace("<head>", "<head>\n" + urlRewriteScript);
+    if (htmlContent.includes("<head>")) {
+      htmlContent = htmlContent.replace("<head>", `<head>${importMapScript}`);
+    } else {
+      htmlContent = `<head>${importMapScript}</head>${htmlContent}`;
+    }
+
+    htmlContent = injectUrlRewriteScript(htmlContent, projectKey);
 
     htmlContent = injectClientBusCode(
       htmlContent,
