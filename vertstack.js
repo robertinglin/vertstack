@@ -18,7 +18,7 @@ function extractCode(tag) {
 let vertstackTimeout = 1000;
 if (process.argv.includes("--timeout=")) {
   vertstackTimeout = parseInt(
-    process.argv.find((arg) => arg.startsWith("--timeout=")).split("=")[1],
+    process.argv.find((arg) => arg.startsWith("--timeout=")).split("=")[1]
   );
 }
 
@@ -134,7 +134,7 @@ function watchResizeScript() {
         }
       }
     },
-    false,
+    false
   );
 }
 // </watchresize>
@@ -216,7 +216,7 @@ function createBus(projectKey, handleRemoteDispatch) {
           console.error(
             "Request timed out: " + requestId + " for key: " + key,
             data,
-            target,
+            target
           );
         }
         resolve([]);
@@ -369,7 +369,7 @@ function createBus(projectKey, handleRemoteDispatch) {
           } catch (error) {
             console.error(`Error in subscriber callback for ${key}:`, error);
           }
-        }),
+        })
       );
     }
     return responses;
@@ -399,7 +399,7 @@ function createBus(projectKey, handleRemoteDispatch) {
       return handleFromServerDispatch(
         message.key,
         message.data,
-        message.target ?? true,
+        message.target ?? true
       );
     }
   };
@@ -440,7 +440,7 @@ function InterBus(sendExternalMessage) {
                   projectRequestPromises.set(responseKey, [resolve]);
                   // channel(message);
                   channel({ ...message, pageId: pageId });
-                }),
+                })
               );
             }
           }
@@ -464,7 +464,7 @@ function InterBus(sendExternalMessage) {
               return [pageId, await response.flat()];
             }
             return [pageId, []];
-          }),
+          })
         )
       ).reduce((acc, [pageId, response]) => {
         acc[pageId] = response;
@@ -508,7 +508,7 @@ function InterBus(sendExternalMessage) {
                 new Promise((resolve) => {
                   projectRequestPromises.set(responseKey, [resolve]);
                   channel({ ...message, pageId: pageId });
-                }),
+                })
               );
             }
           }
@@ -522,7 +522,7 @@ function InterBus(sendExternalMessage) {
             "external_" + message.requestId,
             (data) => {
               resolve(data);
-            },
+            }
           );
         });
         sendExternalMessage(message);
@@ -545,7 +545,7 @@ function InterBus(sendExternalMessage) {
               timeout,
             ]);
             return [pageId, response.flat()];
-          }),
+          })
         )
       ).reduce((acc, [pageId, response]) => {
         acc[pageId] = response;
@@ -752,7 +752,7 @@ class WebSocket extends EventEmitter {
 
     let payload = this.frameBuffer.slice(
       maskStart + (masked ? 4 : 0),
-      totalLength,
+      totalLength
     );
 
     if (masked) {
@@ -851,7 +851,7 @@ class WebSocket extends EventEmitter {
       this.emit(
         "close",
         hadError ? 1006 : 1000,
-        hadError ? "Connection closed abnormally" : "Normal closure",
+        hadError ? "Connection closed abnormally" : "Normal closure"
       );
     }
   }
@@ -875,7 +875,7 @@ class WebSocket extends EventEmitter {
         this.close(1001, "Ping timeout");
       } else {
         this.send(Buffer.alloc(0), { opcode: 0x9 }).catch(() =>
-          this.close(1001, "Ping failed"),
+          this.close(1001, "Ping failed")
         );
       }
     }, 1000);
@@ -933,7 +933,7 @@ function initModule(projectKey, session, pageId) {
         }
         child.send(message);
       },
-      pageId,
+      pageId
     );
     child.send({ key: projectKey, data: "connect", target: sessionId, pageId });
   }
@@ -1169,14 +1169,13 @@ function resolveSubModule(basePath, subModule) {
     if (packageJson.bundles && Array.isArray(packageJson.bundles)) {
       const matchingBundle = packageJson.bundles.find(
         (bundle) =>
-          bundle.target.includes(subModule) ||
-          bundle.module.includes(subModule),
+          bundle.target.includes(subModule) || bundle.module.includes(subModule)
       );
       if (matchingBundle) {
         const bundlePath = resolveBundlePath(
           basePath,
           matchingBundle,
-          subModule,
+          subModule
         );
         if (bundlePath) return bundlePath;
       }
@@ -1192,7 +1191,7 @@ function resolveSubModule(basePath, subModule) {
       ) {
         return resolvePath(
           basePath,
-          subModuleExport.import || subModuleExport.require,
+          subModuleExport.import || subModuleExport.require
         );
       }
     }
@@ -1251,8 +1250,9 @@ function generateImportMap(projectPath, rootPath) {
           scopedModules.forEach((scopedModule) => {
             const fullModuleName = `${module}/${scopedModule}`;
             const modulePath = path.join(modulesPath, fullModuleName);
-            importMap.imports[fullModuleName] =
-              `/node_modules/${fullModuleName}`;
+            importMap.imports[
+              fullModuleName
+            ] = `/node_modules/${fullModuleName}`;
           });
         } else {
           importMap.imports[module] = `/node_modules/${module}`;
@@ -1307,7 +1307,7 @@ function serveRoot(res, url) {
       frameBorder="0"
       scrolling="no">
     </iframe>
-  `,
+  `
       )
       .join("");
 
@@ -1373,8 +1373,9 @@ async function serveProjectPage(req, res, projectKey) {
     const projectPath = projectKeys.get(projectKey);
     const rootPath = process.cwd();
 
-    const { publicDir, indexHtmlPath } =
-      await findProjectStructure(projectPath);
+    const { publicDir, indexHtmlPath } = await findProjectStructure(
+      projectPath
+    );
 
     let clientJsPath = "";
     const jsPath = path.join(projectPath, "client.js");
@@ -1405,7 +1406,7 @@ async function serveProjectPage(req, res, projectKey) {
         publicDir,
         projectKey,
         clientJsPath,
-        importMap,
+        importMap
       );
     } else if (indexHtmlPath) {
       await serveHtmlFile(
@@ -1413,7 +1414,7 @@ async function serveProjectPage(req, res, projectKey) {
         indexHtmlPath,
         projectKey,
         clientJsPath,
-        importMap,
+        importMap
       );
     } else {
       serveDefaultProjectPage(
@@ -1421,7 +1422,7 @@ async function serveProjectPage(req, res, projectKey) {
         projectKey,
         projectPath,
         clientJsPath,
-        importMap,
+        importMap
       );
     }
   } catch (error) {
@@ -1444,7 +1445,7 @@ function parseCookies(cookieHeader) {
 }
 
 async function serveApiRequest(req, res, projectKey, proxyPorts) {
-  const cookies = parseCookies(req.headers.cookie);
+  const cookies = parseCookies(req.headers.cookie || "");
   const session = cookies.sessionId;
   if (!session) {
     res.writeHead(401);
@@ -1500,7 +1501,7 @@ async function serveApiRequest(req, res, projectKey, proxyPorts) {
   try {
     const responses = await session.interBus.receiveExternalMessage(
       message,
-      false,
+      false
     );
 
     const response = responses?.find((r) => r.key === requestKey);
@@ -1551,7 +1552,7 @@ function processHtml(htmlContent, projectKey = null) {
     if (projectKey) {
       return content.replace(
         /(<[^>]+\s)(src|href)=(["'])\/(?!\/)/gi,
-        `$1$2=$3/${projectKey}/`,
+        `$1$2=$3/${projectKey}/`
       );
     }
     return content;
@@ -1584,7 +1585,7 @@ function processHtml(htmlContent, projectKey = null) {
           `;
         }
         return match;
-      },
+      }
     );
 
     return processedPart;
@@ -1598,7 +1599,7 @@ function serveDefaultProjectPage(
   projectKey,
   projectPath,
   clientJsPath,
-  importMap,
+  importMap
 ) {
   res.writeHead(200, { "Content-Type": "text/html" });
   let htmlContent = `
@@ -1676,7 +1677,7 @@ async function serveFromPublicDirectory(
   publicDir,
   projectKey,
   clientJsPath,
-  importMap,
+  importMap
 ) {
   const relativePath = req.url.split("?")[0].slice(projectKey.length + 2);
   const filePath = path.join(publicDir, relativePath);
@@ -1695,7 +1696,7 @@ async function serveFromPublicDirectory(
           indexPath,
           projectKey,
           clientJsPath,
-          importMap,
+          importMap
         );
       } else {
         serveNotFound(res);
@@ -1805,7 +1806,7 @@ async function serveHtmlFile(
   filePath,
   projectKey,
   clientJsPath,
-  importMap,
+  importMap
 ) {
   try {
     let htmlContent = fs.readFileSync(filePath, "utf8");
@@ -1832,7 +1833,7 @@ async function serveHtmlFile(
       htmlContent,
       clientJsPath,
       projectKey,
-      modules,
+      modules
     );
     htmlContent = injectResizeScript(htmlContent, projectKey);
     res.writeHead(200, { "Content-Type": "text/html" });
@@ -1848,7 +1849,7 @@ function injectClientBusCode(
   htmlContent,
   clientJsPath,
   projectKey,
-  modules = [],
+  modules = []
 ) {
   const parseKey = extractCode("parsekey");
   const bus = extractCode("bus");
@@ -1910,17 +1911,17 @@ function injectClientBusCode(
   if (htmlContent.includes("</head>")) {
     htmlContent = htmlContent.replace(
       "</head>",
-      `${busCode}${clientScript}${exportHandlerScript}</head>`,
+      `${busCode}${clientScript}${exportHandlerScript}</head>`
     );
   } else if (htmlContent.includes("<body>")) {
     htmlContent = htmlContent.replace(
       "<body>",
-      `${busCode}${clientScript}${exportHandlerScript}<body>`,
+      `${busCode}${clientScript}${exportHandlerScript}<body>`
     );
   } else if (htmlContent.includes("<html>")) {
     htmlContent = htmlContent.replace(
       "<html>",
-      `<html><head>${busCode}${clientScript}${exportHandlerScript}</head>`,
+      `<html><head>${busCode}${clientScript}${exportHandlerScript}</head>`
     );
   } else {
     htmlContent = `<head>${busCode}${clientScript}${exportHandlerScript}</head>${htmlContent}`;
@@ -2063,7 +2064,7 @@ function setupWebSocketServer(wss) {
 }
 
 function handleWebSocketConnection(ws, request) {
-  const cookies = parseCookies(request.headers.cookie);
+  const cookies = parseCookies(request.headers.cookie || "");
   const sessionId = cookies.sessionId;
 
   if (!sessions.has(sessionId)) {
@@ -2106,7 +2107,7 @@ async function handleWebSocketMessage(messageString, session) {
       console.error(
         "Client attempted to send a broadcast message",
         session.id,
-        message,
+        message
       );
     } else {
       if (!message.target) {
@@ -2129,7 +2130,7 @@ function sendInitialConnectionInfo(ws, session) {
       data: {
         sessionId: session.sessionId,
       },
-    }),
+    })
   );
 }
 
@@ -2184,7 +2185,7 @@ function forkChildProcess(project) {
     {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
       maxBuffer: 100 * 1024 * 1024,
-    },
+    }
   );
 }
 
@@ -2200,7 +2201,7 @@ function setupChildProcessListeners(child, project) {
   });
 
   child.on("message", (message) =>
-    handleChildProcessMessage(message, project, child),
+    handleChildProcessMessage(message, project, child)
   );
   child.on("error", (error) => handleChildProcessError(error, project));
   child.on("exit", (code) => handleChildProcessExit(code, project));
@@ -2229,7 +2230,7 @@ function broadcastMessageToSessions(message, sourceProject) {
       }
       await session.interBus.receiveInternalMessage(
         sourceProject,
-        messageToSend,
+        messageToSend
       );
     }
   });
@@ -2390,7 +2391,7 @@ function client(projectKey) {
           type: "childMouseEvent",
           event: eventData,
         },
-        "*",
+        "*"
       );
     }
 
@@ -2414,7 +2415,7 @@ function client(projectKey) {
             type: "mouseEvent",
             event: iframeEvent,
           },
-          "*",
+          "*"
         );
       });
     }
@@ -2445,7 +2446,7 @@ function client(projectKey) {
           propagateEventToChildren(eventData);
         }
       },
-      true,
+      true
     );
   }
 
@@ -2458,7 +2459,7 @@ function client(projectKey) {
         });
       }
     },
-    false,
+    false
   );
 
   window.addEventListener(
@@ -2467,14 +2468,14 @@ function client(projectKey) {
       if (event.data.type === "getPageId") {
         window.parent.postMessage(
           { type: "setupProjectChannel", projectKey: event.data.projectKey },
-          "*",
+          "*"
         );
         if (event.source && event.source !== window) {
           event.source.postMessage({ type: "setPageId", pageId: pageId }, "*");
         }
       }
     },
-    false,
+    false
   );
 
   window.parent.postMessage({ type: "getPageId", projectKey: projectKey }, "*");
@@ -2494,7 +2495,9 @@ function webWorker() {
 
   function connectWebSocket() {
     ws = new WebSocket(
-      `${self.location.protocol === "https:" ? "wss://" : "ws://"}${self.location.host}`,
+      `${self.location.protocol === "https:" ? "wss://" : "ws://"}${
+        self.location.host
+      }`
     );
     ws.onopen = () => {
       if (queue.length > 0) {
@@ -2541,7 +2544,7 @@ function webWorker() {
         message.interBus = true;
         broadcastChannels.get(key).postMessage(message);
       },
-      pageId,
+      pageId
     );
 
     if (clientInstanceQueues.has(key + "_" + pageId)) {
@@ -2574,7 +2577,7 @@ function webWorker() {
       connectClientInstance(sourceKey, pageId);
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(
-          JSON.stringify({ key: sourceKey, data: "connect", pageId: pageId }),
+          JSON.stringify({ key: sourceKey, data: "connect", pageId: pageId })
         );
       } else {
         queue.push({ key: sourceKey, data: "connect", pageId: pageId });
@@ -2588,7 +2591,7 @@ function webWorker() {
             key: sourceKey,
             data: "disconnect",
             pageId: pageId,
-          }),
+          })
         );
       });
       if (clientInstances.has(sourceKey)) {
@@ -2602,7 +2605,7 @@ function webWorker() {
     }
     if (message.target === "*") {
       throw new Error(
-        "Client cannot handle broadcast messages, " + JSON.stringify(message),
+        "Client cannot handle broadcast messages, " + JSON.stringify(message)
       );
     }
     if (message.pageId && message.pageId !== pageId) {
@@ -2786,7 +2789,7 @@ function mainClient(projectKeys) {
               type: "mouseEvent",
               event: adjustedEvent,
             },
-            "*",
+            "*"
           );
         }
       });
@@ -2799,7 +2802,7 @@ function mainClient(projectKeys) {
           propagateEvent(event.data.event);
         }
       },
-      true,
+      true
     );
 
     const mouseEvents = [
@@ -2825,7 +2828,7 @@ function mainClient(projectKeys) {
           };
           propagateEvent(adjustedEvent);
         },
-        true,
+        true
       );
     });
 
@@ -2856,7 +2859,7 @@ function mainClient(projectKeys) {
         });
       }
     },
-    false,
+    false
   );
 
   setupWorker();
@@ -2877,8 +2880,9 @@ function handleSandboxedMode() {
 
   async function loadModule(project) {
     const folderPath = path.join(process.cwd(), project);
-    const { moduleCreator, modulePath, exports } =
-      await findAndLoadModule(folderPath);
+    const { moduleCreator, modulePath, exports } = await findAndLoadModule(
+      folderPath
+    );
     moduleLoaded = true;
     return { moduleCreator, exports };
   }
@@ -2999,15 +3003,15 @@ function handleSandboxedMode() {
         if (key.startsWith("_")) {
           key = key.slice(1);
           bus(key, (payload) =>
-            func(payload.data, bus, sessionId, pageId, payload),
+            func(payload.data, bus, sessionId, pageId, payload)
           );
         } else if (key.startsWith("$")) {
           bus(key, (payload) =>
-            func(payload.data, bus, sessionId, pageId, payload),
+            func(payload.data, bus, sessionId, pageId, payload)
           );
         } else {
           bus("*." + key, (payload) =>
-            func(payload.data, bus, sessionId, pageId, payload),
+            func(payload.data, bus, sessionId, pageId, payload)
           );
         }
         let altKey = key.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
@@ -3015,15 +3019,15 @@ function handleSandboxedMode() {
           if (altKey.startsWith("_")) {
             altKey = altKey.slice(1);
             bus(altKey, (payload) =>
-              func(payload.data, bus, sessionId, pageId, payload),
+              func(payload.data, bus, sessionId, pageId, payload)
             );
           } else if (altKey.startsWith("$")) {
             bus(altKey, (payload) =>
-              func(payload.data, bus, sessionId, pageId, payload),
+              func(payload.data, bus, sessionId, pageId, payload)
             );
           } else {
             bus("*." + altKey, (payload) =>
-              func(payload.data, bus, sessionId, pageId, payload),
+              func(payload.data, bus, sessionId, pageId, payload)
             );
           }
         }
@@ -3072,7 +3076,7 @@ if (isSandboxed) {
         }
         return acc;
       },
-      [[], []],
+      [[], []]
     );
     const options = prefixedArgs.reduce(
       (acc, [key, value]) => {
@@ -3081,7 +3085,7 @@ if (isSandboxed) {
       },
       {
         port: "3000",
-      },
+      }
     );
 
     const proxyPorts = new Map();
@@ -3095,11 +3099,11 @@ if (isSandboxed) {
     Promise.all(modules.map(({ module }) => loadServerModule(module))).then(
       () => {
         setupServer(options, proxyPorts);
-      },
+      }
     );
   } else {
     console.log(
-      "No server modules specified. Run with: node script.js module1[=proxyPort] module2[=proxyPort] ...",
+      "No server modules specified. Run with: node script.js module1[=proxyPort] module2[=proxyPort] ..."
     );
   }
 }
