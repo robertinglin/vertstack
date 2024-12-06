@@ -15,7 +15,7 @@ function extractCode(tag) {
   return match ? match[1].trim() : "";
 }
 
-let vertstackTimeout = 1000;
+let vertstackTimeout = 5000;
 if (process.argv.includes("--timeout=")) {
   vertstackTimeout = parseInt(
     process.argv.find((arg) => arg.startsWith("--timeout=")).split("=")[1]
@@ -2265,19 +2265,47 @@ process.on("SIGINT", () => {
 function client(projectKey) {
   let pageId;
   let queue = [];
+  let ponged = false;
+  let pinged = false;
+
+  const postMessage = (message) => {
+    broadcastChannel.postMessage(message);
+  };
+
   const [bus, handleExternal] = createBus(projectKey, (message) => {
-    if (!pageId) {
+    if (!ponged) {
       queue.push(message);
       return;
     }
     message.pageId = pageId;
-    broadcastChannel.postMessage(message);
+    postMessage(message);
   });
   window.bus = bus;
+
+  const flushMessageQueue = () => {
+    const messages = [...queue];
+    queue = [];
+    messages.forEach((message) => {
+      message.pageId = pageId;
+      postMessage(message);
+    });
+  };
 
   const broadcastChannel = new BroadcastChannel(projectKey);
   broadcastChannel.onmessage = async (event) => {
     const message = event.data;
+    if (
+      pinged &&
+      message.type === "pong" &&
+      (message.pageId === pageId ||
+        (!message.pageId && message.key === projectKey))
+    ) {
+      ponged = true;
+      pinged = false;
+      flushMessageQueue();
+      return;
+    }
+
     if (!message.interBus || (!message.requestId && !message.responseId)) {
       return;
     }
@@ -2288,7 +2316,7 @@ function client(projectKey) {
 
     const res = await handleExternal(message);
     if (!message.responseId) {
-      broadcastChannel.postMessage({
+      postMessage({
         responseId: message.requestId,
         data: res,
         pageId,
@@ -2297,21 +2325,18 @@ function client(projectKey) {
   };
 
   function initClient(receivedPageId) {
-    pageId = receivedPageId;
+    pinged = true;
+    postMessage({ key: projectKey, data: "ping", pageId });
 
-    broadcastChannel.postMessage({ key: projectKey, data: "connect", pageId });
+    // broadcastChannel.postMessage({ key: projectKey, data: "connect", pageId });
+    queue.unshift({ key: projectKey, data: "connect", pageId });
 
     window.addEventListener("beforeunload", () => {
-      broadcastChannel.postMessage({
+      postMessage({
         key: projectKey,
         data: "disconnect",
         pageId,
       });
-    });
-
-    queue.forEach((message) => {
-      message.pageId = pageId;
-      broadcastChannel.postMessage(message);
     });
 
     setupMouseEventSharing();
@@ -2454,6 +2479,8 @@ function client(projectKey) {
     "message",
     function (event) {
       if (event.data.type === "setPageId" && !pageId) {
+        pageId = event.data.pageId;
+
         this.setTimeout(() => {
           initClient(event.data.pageId);
         });
@@ -2527,8 +2554,27 @@ function webWorker() {
   function setupBroadcastChannel(key) {
     if (!broadcastChannels.has(key)) {
       const channel = new BroadcastChannel(key);
-      channel.onmessage = (event) => handleProjectChannelMessage(key, event);
+      channel.onmessage = (event) => {
+        // If it's a ping, respond immediately with a pong
+        if (event.data.data === "ping") {
+          channel.postMessage({
+            type: "pong",
+            key: key,
+            pageId: event.data.pageId,
+            timestamp: Date.now(),
+          });
+          return;
+        }
+        handleProjectChannelMessage(key, event);
+      };
       broadcastChannels.set(key, channel);
+
+      // Send initial pong to notify any existing clients
+      channel.postMessage({
+        type: "pong",
+        key: key,
+        timestamp: Date.now(),
+      });
     }
   }
 
@@ -2677,10 +2723,8 @@ function mainClient(projectKeys) {
     worker = new SharedWorker("websocket-worker.js");
     worker.port.onmessage = handleWorkerMessage;
     worker.port.start();
-
     projectKeys.forEach((key) => {
       sendOrQueueMessage({ type: "setupChannel", data: key });
-      setupSingleProjectChannel(key);
     });
 
     worker.port.postMessage({ type: "ready" });
@@ -2717,17 +2761,6 @@ function mainClient(projectKeys) {
         console.error("WebSocket error:", data);
         break;
     }
-  }
-
-  function setupSingleProjectChannel(key) {
-    const channel = new BroadcastChannel(key);
-    channel.onmessage = (event) => handleProjectChannelMessage(key, event);
-    channels.push(channel);
-  }
-
-  function handleProjectChannelMessage(sourceKey, event) {
-    const message = event.data;
-    sendOrQueueMessage({ type: "send", data: { sourceKey, message } });
   }
 
   function cleanupBroadcastChannels() {
@@ -2850,9 +2883,6 @@ function mainClient(projectKeys) {
           event.source.postMessage({ type: "setPageId", pageId: pageId }, "*");
         }
       } else if (event.data.type === "setupProjectChannel") {
-        if (!workerReady) {
-          setupSingleProjectChannel(event.data.projectKey);
-        }
         sendOrQueueMessage({
           type: "setupChannel",
           data: event.data.projectKey,

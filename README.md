@@ -58,8 +58,9 @@ your-project/
 Run the following command from your project root:
 
 ```bash
-npx VertStack --port=3456 module1 module2 ...
+npx vertstack --port=3456 module1 module2 ...
 ```
+
 Replace `module1`, `module2`, etc., with the names of your module directories.
 
 ### Local Installation and Usage
@@ -72,7 +73,7 @@ You can install VertStack locally in your project directory by using the `--inst
 To install:
 
 ```bash
-npx VertStack --install [options] module1 module2 ...
+npx vertstack --install [options] module1 module2 ...
 ```
 
 Once installed, you can use the following scripts:
@@ -87,7 +88,7 @@ Example usage:
 
 ```bash
 # Install VertStack locally with custom port and modules
-npx VertStack --install --port=3456 module1 module2
+npx vertstack --install --port=3456 module1 module2
 
 # Start the server with auto-restart (development mode)
 ./watch.cmd  # or ./watch.sh on Unix systems
@@ -131,6 +132,7 @@ VertStack automatically serves static files from the `public/` or `dist/` direct
 3. These files will be automatically served when accessing your module's route.
 
 Example structure:
+
 ```
 module1/
 ├── server.js
@@ -151,24 +153,25 @@ You can provide a custom `index.html` file in the root of your project to contro
 2. Use the special comment syntax `<!-- @[MODULENAME] -->` to indicate where each module should be rendered.
 
 Example `index.html`:
+
 ```html
 <!DOCTYPE html>
 <html>
-<head>
+  <head>
     <title>My VertStack Application</title>
-</head>
-<body>
+  </head>
+  <body>
     <header>Welcome to My App</header>
     <main>
-        <section id="module1">
-            <!-- @module1 -->
-        </section>
-        <section id="module2">
-            <!-- @module2 -->
-        </section>
+      <section id="module1">
+        <!-- @module1 -->
+      </section>
+      <section id="module2">
+        <!-- @module2 -->
+      </section>
     </main>
     <footer>© 2024 My VertStack Application</footer>
-</body>
+  </body>
 </html>
 ```
 
@@ -177,6 +180,7 @@ Example `index.html`:
 VertStack automatically rewrites relative URLs within each module to ensure they work correctly when served as part of the larger application.
 
 This feature works for:
+
 - HTML `src` and `href` attributes
 - CSS `url()` functions
 - Dynamically added elements and styles
@@ -209,11 +213,10 @@ The `#` prefix allows you to send messages to specific channels (modules) from a
 // Send a message to the 'userStats' module
 bus("#userStats.update", { activeUsers: 10 });
 
-
 // userStats exports a handler
 export const update = (payload) => {
   // handle the event
-}
+};
 ```
 
 ## Local Message Handling
@@ -229,13 +232,13 @@ bus("$localEvent", { someData: "value" });
 bus("$local-event", { someData: "value" });
 
 export const $localEvent = (payload) => {
-    // Handle the local event
+  // Handle the local event
 };
 ```
 
 ## Vertical Message Handling
 
-The `_` prefix is used for server to client messages in a single module. If prefixed with _ only the server or client module will receive the message.
+The `_` prefix is used for server to client messages in a single module. If prefixed with \_ only the server or client module will receive the message.
 
 ### Usage:
 
@@ -256,27 +259,30 @@ As a server can handle multiple clients it is configured slightly different. It 
 
 ```javascript
 export default (bus, sessionId, pageId) => {
-  console.log('new user', sessionId, pageId)
+  console.log("new user", sessionId, pageId);
   return () => {
-    console.log('called when user leaves');
-  }
-}
+    console.log("called when user leaves");
+  };
+};
 ```
 
 ## Listening to all messages
 
-In the event that you want to subscribe to all public messages for the session you can use the wildcard `*` prefix directly on the bus.  
+In the event that you want to subscribe to all public messages for the session you can use the wildcard `*` prefix directly on the bus.
 
 ```javascript
 export default (bus, sessionId, pageId) => {
-  bus('*', (payload) => {
-    console.log('Received message', payload);
+  bus("*", (payload) => {
+    console.log("Received message", payload);
   });
 
-  bus('*.targetedMessage', (payload) => {
-    console.log('Received message with .targetedMessage as subkek and the payload', payload);
+  bus("*.targetedMessage", (payload) => {
+    console.log(
+      "Received message with .targetedMessage as subkek and the payload",
+      payload
+    );
   });
-}
+};
 ```
 
 ## Proxy Support
@@ -288,7 +294,7 @@ VertStack supports proxying requests to specific ports for each module. This fea
 When starting the server, you can specify a proxy port for each module:
 
 ```bash
-npx VertStack module1=8080 module2=8081
+npx vertstack module1=8080 module2=8081
 ```
 
 This will set up module1 to proxy requests to port 8080 and module2 to port 8081.
@@ -305,7 +311,7 @@ If you have an existing API running on port 8080, you can integrate it with your
 ```javascript
 // In your client.js
 async function fetchData() {
-  const response = await fetch('/module1/p/api/data');
+  const response = await fetch("/module1/p/api/data");
   const data = await response.json();
   // Process the data
 }
@@ -323,13 +329,13 @@ The `pageId` is automatically generated and managed by VertStack. In your module
 
 ```javascript
 module.exports = function (bus, sessionId, pageId) {
-  bus('someEvent', (payload) => {
+  bus("someEvent", (payload) => {
     console.log(`Received event for page: ${pageId}`);
     // Handle the event
   });
 
   // Send a message to a specific page instance
-  bus('specificPageEvent', data, sessionId, pageId);
+  bus("specificPageEvent", data, sessionId, pageId);
 };
 ```
 
@@ -337,9 +343,9 @@ module.exports = function (bus, sessionId, pageId) {
 
 ```javascript
 // The pageId is automatically handled in the background
-bus('someEvent', (payload) => {
+bus("someEvent", (payload) => {
   // This will only be called for events sent to this specific page instance
-  console.log('Received event:', payload);
+  console.log("Received event:", payload);
 });
 ```
 
