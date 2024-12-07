@@ -16,6 +16,7 @@ VertStack is a lightweight framework for building modular, real-time web applica
 - Private messaging for secure communication
 - Static file serving for project directories
 - Custom `index.html` support with module placement
+- Template system for reusable HTML components
 - Automatic URL rewriting for relative paths
 - Iframe-based module rendering with automatic resizing
 - WebSocket connection with automatic reconnection
@@ -38,9 +39,13 @@ VertStack is a lightweight framework for building modular, real-time web applica
 your-project/
 ├── VertStack
 ├── index.html (optional)
+├── templates/               # Global templates directory
+│   ├── header.html
+│   └── footer.html
 ├── module1/
 │   ├── client.js
 │   ├── server.js
+│   ├── header.html         # Module-specific template
 │   └── public/ or dist/ (optional)
 │       ├── index.html
 │       └── ... (other static files)
@@ -174,6 +179,143 @@ Example `index.html`:
   </body>
 </html>
 ```
+
+## Template System
+
+VertStack includes a powerful template system that allows you to create reusable HTML components and include them in your pages. Templates can be either global (shared across all modules) or module-specific.
+
+### Template Directory Structure
+
+- Global templates: Place in the root `templates/` directory
+- Module-specific templates: Place directly in the module directory
+
+```
+your-project/
+├── templates/
+│   ├── header.html         # Global header template
+│   ├── footer.html         # Global footer template
+│   └── navigation.html     # Global navigation template
+└── module1/
+    ├── header.html         # Module-specific header (overrides global)
+    └── sidebar.html        # Module-specific sidebar
+```
+
+### Using Templates
+
+Use the special comment syntax `<!-- @@templateName -->` to include templates in your HTML files.
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>My VertStack Application</title>
+  </head>
+  <body>
+    <!-- @@header -->
+    <main>
+      <div class="sidebar">
+        <!-- @@sidebar -->
+      </div>
+      <div class="content">
+        <!-- @module1 -->
+      </div>
+    </main>
+    <!-- @@footer -->
+  </body>
+</html>
+```
+
+### Template Features
+
+1. **Template Hierarchy**
+
+   - Module-specific templates take precedence over global templates
+   - Allows for module-level customization while maintaining global defaults
+
+2. **Nested Templates**
+
+   - Templates can include other templates
+   - Circular references are automatically detected and prevented
+
+3. **Module Integration**
+
+   - Templates can include module references (`<!-- @module -->`)
+   - All module references are collected and processed
+
+4. **URL Rewriting**
+   - Relative URLs in templates are automatically rewritten
+   - Ensures proper resource loading in both global and module contexts
+
+### Example Templates
+
+1. Global header template (`templates/header.html`):
+
+```html
+<header class="site-header">
+  <div class="logo">
+    <!-- @@logo -->
+  </div>
+  <nav>
+    <!-- @@navigation -->
+  </nav>
+  <!-- @userProfile -->
+</header>
+```
+
+2. Module-specific sidebar (`module1/sidebar.html`):
+
+```html
+<div class="module-sidebar">
+  <h3>Module Navigation</h3>
+  <ul>
+    <li><a href="/section1">Section 1</a></li>
+    <li><a href="/section2">Section 2</a></li>
+  </ul>
+  <!-- @moduleNav -->
+</div>
+```
+
+3. Template with nested components (`templates/page-layout.html`):
+
+```html
+<div class="page-container">
+  <!-- @@header -->
+  <div class="content-wrapper">
+    <!-- @@sidebar -->
+    <main>
+      <!-- @content -->
+    </main>
+  </div>
+  <!-- @@footer -->
+</div>
+```
+
+### Template Best Practices
+
+1. **Modularity**
+
+   - Keep templates focused on specific components
+   - Use nested templates for complex layouts
+   - Avoid deep nesting (more than 3-4 levels)
+
+2. **Naming Conventions**
+
+   - Use descriptive, component-based names
+   - Consider using prefixes for different template types:
+     - `layout-` for page layouts
+     - `component-` for reusable components
+     - `section-` for content sections
+
+3. **Performance**
+
+   - Keep templates lightweight
+   - Use module references (`<!-- @module -->`) for dynamic content
+   - Consider caching strategies for frequently used templates
+
+4. **Maintenance**
+   - Document template dependencies
+   - Keep a consistent structure between global and module-specific templates
+   - Regular review of template usage and necessity
 
 ## URL Rewriting
 
@@ -356,6 +498,11 @@ bus("someEvent", (payload) => {
 - Verify that event keys are correctly namespaced to avoid conflicts between modules.
 - If static files are not being served, check that they are placed in the `public/` or `dist/` directory of the module.
 - For custom layouts, ensure your root `index.html` file uses the correct `<!-- @[MODULENAME] -->` syntax for module placement.
+- If templates aren't loading, check:
+  - Template file names match the references exactly
+  - Templates are in the correct directory (`templates/` or module directory)
+  - No circular references in nested templates
+  - File permissions allow reading template files
 
 ## Contributing
 

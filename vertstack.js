@@ -1558,6 +1558,85 @@ function processHtml(htmlContent, projectKey = null) {
     return content;
   }
 
+  function processTemplates(content, processedTemplates = new Set()) {
+    return content.replace(/<!--\s*@@(\S+)\s*-->/g, (match, templateName) => {
+      // Prevent infinite recursion
+      if (processedTemplates.has(templateName)) {
+        console.warn(`Circular template reference detected: ${templateName}`);
+        return `<!-- Warning: Circular template reference: ${templateName} -->`;
+      }
+
+      let templatePath;
+      if (projectKey) {
+        // First try project-specific template
+        templatePath = path.join(
+          process.cwd(),
+          projectKey,
+          `${templateName}.html`
+        );
+        if (!fs.existsSync(templatePath)) {
+          // Fallback to global templates directory
+          templatePath = path.join(
+            process.cwd(),
+            "templates",
+            `${templateName}.html`
+          );
+        }
+      } else {
+        templatePath = path.join(
+          process.cwd(),
+          "templates",
+          `${templateName}.html`
+        );
+      }
+
+      try {
+        if (!fs.existsSync(templatePath)) {
+          console.warn(`Template not found: ${templatePath}`);
+          return `<!-- Template not found: ${templateName} -->`;
+        }
+
+        const templateContent = fs.readFileSync(templatePath, "utf8");
+
+        // Track this template to prevent circular references
+        processedTemplates.add(templateName);
+
+        // Process the template content recursively
+        return processTemplates(templateContent, processedTemplates);
+      } catch (error) {
+        console.error(`Error processing template ${templateName}:`, error);
+        return `<!-- Error processing template: ${templateName} -->`;
+      }
+    });
+  }
+
+  function processModules(content) {
+    return content.replace(
+      /<!-- @(\w+)(?:\s+height="(\d+)")?\s*-->/g,
+      (match, moduleName, height) => {
+        if (projectKeys.has(moduleName)) {
+          modules.add(moduleName);
+          const heightAttr = height ? ` height="${height}"` : "";
+          const isHidden = height === "0";
+          const style = isHidden
+            ? "border: none; width: 1px; height: 1px; position: absolute; opacity: 0; pointer-events: none; overflow: hidden;"
+            : "border: none; background-color: transparent; width: 100%";
+
+          return `
+            <iframe
+              src="/${moduleName}?t=${currentTime}"
+              style="${style}"
+              allowTransparency="true"
+              frameBorder="0"
+              scrolling="no"${heightAttr}>
+            </iframe>
+          `;
+        }
+        return match;
+      }
+    );
+  }
+
   // Split the HTML content into parts: outside iframes and inside iframes
   const parts = htmlContent.split(/(<iframe[\s\S]*?<\/iframe>)/gi);
   const processedParts = parts.map((part, index) => {
@@ -1565,28 +1644,13 @@ function processHtml(htmlContent, projectKey = null) {
     if (index % 2 !== 0) {
       return part;
     }
-    // For non-iframe content, apply the URL rewriting and iframe generation
-    let processedPart = rewriteUrls(part);
 
-    processedPart = processedPart.replace(
-      /<!-- @(\w+)(?:\s+height="(\d+)")?\s*-->/g,
-      (match, moduleName, height) => {
-        if (projectKeys.has(moduleName)) {
-          modules.add(moduleName);
-          const heightAttr = height ? ` height="${height}"` : "";
-          return `
-          <iframe
-            src="/${moduleName}?t=${currentTime}"
-            style="border: none; background-color: transparent; width: 100%"
-            allowTransparency="true"
-            frameBorder="0"
-            scrolling="no"${heightAttr}>
-          </iframe>
-          `;
-        }
-        return match;
-      }
-    );
+    // First process templates
+    let processedPart = processTemplates(part);
+
+    // Then process modules and rewrite URLs
+    processedPart = processModules(processedPart);
+    processedPart = rewriteUrls(processedPart);
 
     return processedPart;
   });
@@ -2475,11 +2539,18 @@ function client(projectKey) {
     );
   }
 
+  const queuedPageIdRequests = [];
   window.addEventListener(
     "message",
     function (event) {
       if (event.data.type === "setPageId" && !pageId) {
         pageId = event.data.pageId;
+
+        if (queuedPageIdRequests.length > 0) {
+          queuedPageIdRequests.forEach((eventSource) => {
+            eventSource.postMessage({ type: "setPageId", pageId }, "*");
+          });
+        }
 
         this.setTimeout(() => {
           initClient(event.data.pageId);
@@ -2498,7 +2569,11 @@ function client(projectKey) {
           "*"
         );
         if (event.source && event.source !== window) {
-          event.source.postMessage({ type: "setPageId", pageId: pageId }, "*");
+          if (!pageId) {
+            queuedPageIdRequests.push(event.source);
+          } else {
+            event.source.postMessage({ type: "setPageId", pageId }, "*");
+          }
         }
       }
     },
