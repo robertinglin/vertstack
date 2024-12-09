@@ -124,7 +124,9 @@ function watchResizeScript() {
               nextChar === "?" ||
               nextChar === "#"
             ) {
-              iframes[i].style.height = event.data.height + "px";
+              iframes[i].style.height =
+                (iframes[i].attributes["height"]?.value ?? event.data.height) +
+                "px";
               break;
             }
           }
@@ -1394,6 +1396,11 @@ async function serveProjectPage(req, res, projectKey) {
     if (req.url.split("/").pop().includes(".")) {
       const filePath = path.join(projectPath, req.url.split("/").pop());
       if (fs.existsSync(filePath)) {
+        if (filePath.includes("server.") || filePath.includes("server/")) {
+          res.writeHead(403);
+          res.end("Forbidden");
+          return;
+        }
         const fileStream = fs.createReadStream(filePath);
         res.writeHead("200", { "Content-Type": getContentType(filePath) });
         fileStream.pipe(res);
