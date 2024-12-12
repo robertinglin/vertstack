@@ -1619,11 +1619,13 @@ function processHtml(htmlContent, projectKey = null) {
 
   function processModules(content) {
     return content.replace(
-      /<!-- @(\w+)(?:\s+height="(\d+)")?\s*-->/g,
+      /<!-- @(\w+)(?:\s+height="(\d+|full)")?\s*-->/g,
       (match, moduleName, height) => {
         if (projectKeys.has(moduleName)) {
           modules.add(moduleName);
-          const heightAttr = height ? ` height="${height}"` : "";
+          const heightAttr = height
+            ? ` height="${height}" data-height="${height}"`
+            : "";
           const isHidden = height === "0";
           const style = isHidden
             ? "border: none; width: 1px; height: 1px; position: absolute; opacity: 0; pointer-events: none; overflow: hidden;"
@@ -2800,6 +2802,14 @@ function mainClient(projectKeys) {
 
   const pageId =
     Math.random().toString(36).substring(2) + Date.now().toString(36);
+
+  const style = document.createElement("style");
+  style.textContent = `
+    iframe[data-height="full"] {
+      height: 100% !important;
+    }
+  `;
+  document.head.appendChild(style);
 
   function setupWorker() {
     worker = new SharedWorker("websocket-worker.js");
