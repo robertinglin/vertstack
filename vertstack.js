@@ -1031,15 +1031,76 @@ function createHttpServer(proxyPorts) {
   });
 }
 
+// Module cache to store wrapped content
+const moduleCache = new Map();
+
+function wrapUMDAsESM(content, moduleName) {
+  return `
+let exports = {};
+let module = { exports: {} };
+
+${content}
+
+export default module.exports;
+
+`;
+}
+
 function serveNodeModules(req, res) {
   const modulePath = path.join(process.cwd(), req.url);
+
   try {
+    // Check cache first
+    if (moduleCache.has(modulePath)) {
+      const { content, contentType } = moduleCache.get(modulePath);
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(content);
+      return;
+    }
+
+    // Resolve the actual file path
     const resolvedPath = resolveModulePath(modulePath);
 
     if (resolvedPath) {
-      const fileContent = fs.readFileSync(resolvedPath);
-      res.writeHead(200, { "Content-Type": getContentType(resolvedPath) });
-      res.end(fileContent);
+      const content = fs.readFileSync(resolvedPath, "utf8");
+      let finalContent = content;
+      let contentType = getContentType(resolvedPath);
+
+      // Check if this is a JavaScript file that needs wrapping
+      if (resolvedPath.endsWith(".js") || resolvedPath.endsWith(".mjs")) {
+        // Check if it's already an ES module
+        if (!content.includes("export ") && !content.includes("import ")) {
+          // Check if it's a UMD module
+          if (content.includes("define.amd")) {
+            let moduleName = path.basename(
+              resolvedPath,
+              path.extname(resolvedPath)
+            );
+            if (moduleName.endsWith(".min")) {
+              moduleName = moduleName.slice(0, -4);
+            }
+            finalContent = wrapUMDAsESM(content, moduleName);
+            contentType = "application/javascript; charset=utf-8";
+          }
+        }
+      }
+
+      // Cache the processed content
+      moduleCache.set(modulePath, {
+        content: finalContent,
+        contentType,
+      });
+
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(finalContent);
     } else {
       serveNotFound(res);
     }
@@ -1051,6 +1112,24 @@ function serveNodeModules(req, res) {
 
 function resolveModulePath(modulePath) {
   if (fs.existsSync(modulePath)) {
+    // Check for bundled versions in root directory first
+    const fileName = path.basename(modulePath);
+    const rootDir = path.dirname(modulePath);
+    if (rootDir.endsWith("node_modules")) {
+      const rootVersions = [
+        path.join(modulePath, `${fileName}.min.mjs`),
+        path.join(modulePath, `${fileName}.mjs`),
+        path.join(modulePath, `${fileName}.min.js`),
+        path.join(modulePath, `${fileName}.js`),
+      ];
+
+      for (const version of rootVersions) {
+        if (fs.existsSync(version)) {
+          return version;
+        }
+      }
+    }
+
     const stats = fs.statSync(modulePath);
     if (stats.isFile()) {
       return modulePath;
